@@ -45,12 +45,13 @@ import feature_testing
 import layout
 import sqldata
 import tracker_store as store
+import motion
 import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.3.8"         # bump this for each release, then push a matching tag (v2.3.8)
-APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
+APP_VERSION = "2.4.0"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_CHANNEL = "testing"       # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
 REPO        = "shivthakar-vital/test-tracking"
@@ -65,70 +66,84 @@ STYLESHEET = """
     QLabel { color: #1A1A18; background: transparent; }
     QLineEdit, QDateEdit, QPlainTextEdit {
         background: #FFFFFF; color: #1A1A18;
-        border: 1.5px solid #CCCCC8; border-radius: 6px;
-        padding: 6px 10px; font-size: 13px;
+        border: 1px solid #CCCCC8; border-radius: 7px;
+        padding: 5px 10px; font-size: 13px;
         selection-background-color: #1D9E75;
     }
-    QLineEdit:focus, QDateEdit:focus, QPlainTextEdit:focus { border: 1.5px solid #1D9E75; }
+    QLineEdit:focus, QDateEdit:focus, QPlainTextEdit:focus { border: 2px solid #1D9E75; padding: 4px 9px; }
     QComboBox {
-        background: #FFFFFF; border: 1px solid #CCCCC8; border-radius: 6px;
+        background: #FFFFFF; border: 1px solid #CCCCC8; border-radius: 7px;
         padding: 4px 10px; font-size: 13px;
     }
+    QComboBox:hover { border-color: #B4B2A9; }
+    QComboBox::drop-down { border: none; width: 18px; }
     QTableView {
         background: #FFFFFF; color: #1A1A18;
-        border: 1px solid #E0DDD8; border-radius: 8px;
+        border: 1px solid #E6E4E0; border-radius: 12px;
         gridline-color: #F0EEE9; font-size: 13px;
         alternate-background-color: #FAFAF8;
     }
     QTableView::item { padding: 0 10px; border: none; }
     QTableView::item:selected { background: #E1F5EE; color: #1A1A18; }
     QHeaderView::section {
-        background: #EEECEA; color: #666663; font-size: 11px; font-weight: bold;
-        padding: 6px 10px; border: none; border-bottom: 1px solid #E0DDD8;
-        border-right: 1px solid #E6E4E0;
+        background: #FFFFFF; color: #666663; font-size: 11px; font-weight: 600;
+        padding: 7px 10px; border: none; border-bottom: 1px solid #E0DDD8;
+        border-right: 1px solid #F0EEE9;
     }
     QPushButton, QToolButton {
         background: #FFFFFF; color: #1A1A18;
-        border: 1px solid #CCCCC8; border-radius: 6px;
-        padding: 6px 14px; font-size: 13px;
+        border: 1px solid #CCCCC8; border-radius: 7px;
+        padding: 5px 14px; font-size: 13px;
     }
-    QPushButton:hover, QToolButton:hover   { background: #EEECEA; }
-    QPushButton:pressed, QToolButton:pressed { background: #E0DDD8; }
+    QPushButton:hover, QToolButton:hover   { background: #FAFAF8; border-color: #B4B2A9; }
+    QPushButton:pressed, QToolButton:pressed { background: #EEECEA; }
     QPushButton:disabled { color: #AAAAA6; }
     QToolButton::menu-indicator { image: none; }
     QToolButton[active="true"] { background: #E1F5EE; border-color: #1D9E75; color: #0F6E56; }
     QPushButton#primary {
-        background: #1D9E75; color: #FFFFFF; border: 2px solid #1D9E75; font-weight: bold;
+        background: #1D9E75; color: #FFFFFF; border: 1px solid #1D9E75; font-weight: 600;
     }
     QPushButton#primary:hover   { background: #17896A; border-color: #17896A; }
+    QPushButton#primary:pressed { background: #0F6E56; border-color: #0F6E56; }
     QPushButton#primary:disabled { background: #8CCDB8; border-color: #8CCDB8; }
     QPushButton#update {
-        background: #2A78D6; color: #FFFFFF; border: none; font-weight: bold;
-        padding: 3px 12px; font-size: 11px;
+        background: #1D9E75; color: #FFFFFF; border: none; font-weight: 600;
+        padding: 3px 12px; font-size: 11px; border-radius: 10px;
     }
     QPushButton#link { border: none; background: transparent; color: #2F5E9E; padding: 2px 4px; }
-    QPushButton#link:hover { text-decoration: underline; }
-    QFrame#card { background: #FFFFFF; border: 1px solid #E6E4E0; border-radius: 10px; }
-    QFrame#card_edit { background: #FFFFFF; border: 2px dashed #1D9E75; border-radius: 10px; }
-    QFrame#tile_edit { background: #FFFFFF; border: 1px dashed #B4B2A9; border-radius: 8px; }
-    QPushButton#dashed { border: 1px dashed #B4B2A9; background: #FAFAF8; color: #52514E; padding: 10px; }
+    QPushButton#link:hover { color: #0F6E56; }
+    QPushButton#link:pressed { color: #17896A; }
+    QFrame#card { background: #FFFFFF; border: 1px solid #E6E4E0; border-radius: 14px; }
+    QFrame#card_edit { background: #FFFFFF; border: 2px dashed #1D9E75; border-radius: 14px; }
+    QFrame#tile_edit { background: #FFFFFF; border: 1px dashed #B4B2A9; border-radius: 10px; }
+    QPushButton#dashed { border: 1px dashed #B4B2A9; background: #FAFAF8; color: #52514E; padding: 10px;
+                         border-radius: 10px; }
     QPushButton#dashed:hover { border-color: #1D9E75; color: #0F6E56; }
-    QFrame#tile { background: #FFFFFF; border: 1px solid #E6E4E0; border-radius: 10px; }
-    QFrame#tile:hover { border-color: #1D9E75; }
-    QFrame#banner { background: #FFF6E5; border: 1px solid #F3D9A4; border-radius: 6px; }
+    QFrame#tile { background: #FFFFFF; border: 1px solid #E6E4E0; border-radius: 12px; }
+    QFrame#tile:hover { border-color: #8CCDB8; }
+    QFrame#banner { background: #FFF6E5; border: 1px solid #F3D9A4; border-radius: 10px; }
     QTabWidget::pane { border: none; }
     QTabBar::tab {
-        background: transparent; color: #666663; padding: 8px 16px; font-size: 13px;
-        border: none; border-bottom: 2px solid transparent;
+        background: transparent; color: #52514E; padding: 7px 16px; margin: 0; font-size: 13px;
+        border: none;
     }
-    QTabBar::tab:selected { color: #1A1A18; border-bottom: 2px solid #1D9E75; font-weight: bold; }
-    QTabBar::tab:hover { color: #1A1A18; }
+    QTabBar::tab:selected { color: #1A1A18; }
+    QTabBar::tab:hover:!selected { color: #1A1A18; }
     QCheckBox { font-size: 12px; color: #52514E; }
-    QListWidget { background: #FFFFFF; border: 1px solid #E0DDD8; border-radius: 6px; font-size: 13px; }
-    QScrollBar:vertical { background: #F5F5F2; width: 8px; border-radius: 4px; }
-    QScrollBar::handle:vertical { background: #CCCCC8; border-radius: 4px; min-height: 30px; }
-    QScrollBar:horizontal { background: #F5F5F2; height: 8px; border-radius: 4px; }
-    QScrollBar::handle:horizontal { background: #CCCCC8; border-radius: 4px; min-width: 30px; }
+    QListWidget { background: #FFFFFF; border: 1px solid #E6E4E0; border-radius: 10px; font-size: 13px; }
+    QToolTip { background: #FFFFFF; color: #1A1A18; border: 1px solid #E0DDD8; border-radius: 6px;
+               padding: 4px 6px; }
+    QMenu { background: #FFFFFF; border: 1px solid #E0DDD8; border-radius: 8px; padding: 4px; }
+    QMenu::item { padding: 5px 18px; border-radius: 5px; color: #1A1A18; }
+    QMenu::item:selected { background: #1D9E75; color: #FFFFFF; }
+    QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+    QScrollBar::handle:vertical { background: #CCCCC8; border-radius: 3px; min-height: 30px; margin: 0 2px; }
+    QScrollBar::handle:vertical:hover { background: #B4B2A9; }
+    QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
+    QScrollBar::handle:horizontal { background: #CCCCC8; border-radius: 3px; min-width: 30px; margin: 2px 0; }
+    QScrollBar::handle:horizontal:hover { background: #B4B2A9; }
+    QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+    QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 """
 
 BLANK = "(blank)"
@@ -849,6 +864,7 @@ class AddChartDialog(QDialog):
         self.back_btn = back
 
         self.modes = QTabWidget()
+        self.modes.setTabBar(ui_theme.segmented_tab_bar())
         self.modes.addTab(simple, "Simple")
         self.modes.addTab(sql_w, "SQL")
 
@@ -2641,6 +2657,7 @@ class ExportDialog(QDialog):
         self.arrange.changed.connect(lambda: self.preview_timer.start(300))
         self.arrange.changed.connect(self._profile_state)
         self.side_tabs = QTabWidget()
+        self.side_tabs.setTabBar(ui_theme.segmented_tab_bar())
         self.sections = SectionsPanel(export_sections.product_names(win.data))
         self.sections.load(saved.get("sections") or export_sections.default_config())
         self.sections.changed.connect(self._update)
@@ -3145,7 +3162,7 @@ class DateBar(QFrame):
     def _changed(self, *_):
         self._apply(save=True)
         if self.win.data:
-            self.win.dashboard.set_data(self.win.data)
+            self.win.dashboard.set_data(self.win.data, animate=True)
             if hasattr(self.win, "testing_page"):
                 self.win.testing_page.refresh()
 
@@ -4279,7 +4296,32 @@ class Dashboard(QScrollArea):
                 filters[dcol["pos"]] = {r["values"][dcol["pos"]] for r in self._rows(tab)} or {"\0"}
         self.win.show_tab(title, filters or None)
 
-    def set_data(self, data):
+    def set_data(self, data, animate=False):
+        """Rebuild the dashboard. With animate (something you did: the dates, a view, first
+        load), cards rise in and charts grow; the background sync redraws without motion."""
+        animate = animate or not getattr(self, "_shown_once", False)
+        self._shown_once = True
+        motion.settle_all()
+        with motion.entrance(animate):
+            self._build(data)
+        if animate and not motion.REDUCED:
+            QTimer.singleShot(0, self._arrive)
+
+    def _arrive(self):
+        body = self.body
+        if body is None or body.layout() is None:
+            return
+        body.layout().activate()
+        top, bottom = self.verticalScrollBar().value(), self.verticalScrollBar().value() + self.viewport().height()
+        k = 0
+        for w in body.children():
+            if isinstance(w, QFrame) and w.objectName() in ("card", "tile") and w.isVisible():
+                if w.geometry().bottom() < top or w.geometry().top() > bottom:
+                    continue                       # off screen: it's simply there when you scroll
+                motion.arrive(w, dy=14, delay=min(k * 45, 360))
+                k += 1
+
+    def _build(self, data):
         pos = self.verticalScrollBar().value()
         body = QWidget()
         body.setObjectName("dash")
@@ -4428,7 +4470,7 @@ class Dashboard(QScrollArea):
     def _toggle_empty(self, href):
         self.show_empty = href == "show"
         if self.win.data:
-            self.set_data(self.win.data)
+            self.set_data(self.win.data, animate=True)
 
     def _tile(self, tab):
         rows = self._rows(tab)
@@ -4777,7 +4819,9 @@ class TrackerApp(QMainWindow):
         root.addLayout(top)
 
         self.tabs = QTabWidget()
+        self.tabs.setTabBar(ui_theme.segmented_tab_bar())
         self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().setDrawBase(False)       # no line under the tabs
         self.dashboard = Dashboard(self)
         self.date_bar = DateBar(self)
         dash_page = QWidget()
@@ -4796,6 +4840,8 @@ class TrackerApp(QMainWindow):
         self.tabs.addTab(self.testing_page, "🧪 Feature Testing")
         self._dash_layout = dash_lay
         self.tabs.currentChanged.connect(self._place_date_bar)
+        self._tab_at = 0
+        self.tabs.currentChanged.connect(self._tab_motion)
         self.empty = QLabel("Add your test-tracking Google Sheet in ⚙ Settings to get started.")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setStyleSheet(f"color:{MUTED}; font-size:14px;")
@@ -5235,7 +5281,7 @@ class TrackerApp(QMainWindow):
         store.save_config(self.cfg)
         self.view_bar.refresh()
         if self.data:
-            self.dashboard.set_data(self.data)
+            self.dashboard.set_data(self.data, animate=True)
 
     def new_view(self):
         if not self.data:
@@ -5729,6 +5775,13 @@ class TrackerApp(QMainWindow):
         if reply == QMessageBox.Yes:
             self._run_installer(r["zip"])
 
+    def _tab_motion(self, i):
+        """The page you picked slides in from its tab's side (left of the last one, or right)."""
+        page, old = self.tabs.widget(i), self.tabs.widget(self._tab_at)
+        if page is not None and old is not None and i != self._tab_at and self.isVisible():
+            motion.switch_page(page.parentWidget(), old, page, 28 if i > self._tab_at else -28)
+        self._tab_at = i
+
     def _place_date_bar(self, *_):
         """One Dates bar for the dashboard and the Feature Testing tab: it moves to whichever is open."""
         if self.tabs.currentWidget() is self.testing_page:
@@ -5841,19 +5894,6 @@ class TrackerApp(QMainWindow):
         super().closeEvent(event)
 
 
-def _light_palette():
-    """Keep the app readable even when macOS is in dark mode."""
-    pal = QPalette()
-    for role, color in [(QPalette.Window, "#F5F5F2"), (QPalette.WindowText, INK),
-                        (QPalette.Base, "#FFFFFF"), (QPalette.AlternateBase, "#FAFAF8"),
-                        (QPalette.Text, INK), (QPalette.Button, "#FFFFFF"),
-                        (QPalette.ButtonText, INK), (QPalette.ToolTipBase, "#FFFFFF"),
-                        (QPalette.ToolTipText, INK), (QPalette.Highlight, ACCENT),
-                        (QPalette.HighlightedText, "#FFFFFF"), (QPalette.PlaceholderText, MUTED)]:
-        pal.setColor(role, QColor(color))
-    return pal
-
-
 if __name__ == "__main__":
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
@@ -5863,7 +5903,7 @@ if __name__ == "__main__":
     app.setStyle("Fusion")   # consistent look on all platforms including macOS
     dark_mode = ui_theme.wants_dark(store.load_config().get("appearance", "light"))
     ui_theme.install(dark_mode, modules=[sys.modules[__name__], blocks])
-    app.setPalette(ui_theme.palette() if dark_mode else _light_palette())
+    app.setPalette(ui_theme.palette())
     window = TrackerApp()
     window.show()
     sys.exit(app.exec_())

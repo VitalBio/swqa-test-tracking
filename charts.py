@@ -15,14 +15,16 @@ from PyQt5.QtWidgets import QWidget, QToolTip, QSizePolicy
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal, QSize
 from PyQt5.QtGui import QPainter, QColor, QPen, QPainterPath, QFont, QFontMetrics
 
-SURFACE = "#FFFFFF"
-INK, INK2, MUTED, GRID = "#1A1A18", "#52514E", "#999996", "#ECEAE6"
-HOVER, TRACK = "#F3F2EF", "#E0DDD8"           # hovered legend row; the empty part of a mini bar
+import motion
 
-_LIGHT = dict(SURFACE="#FFFFFF", INK="#1A1A18", INK2="#52514E", MUTED="#999996", GRID="#ECEAE6",
-              HOVER="#F3F2EF", TRACK="#E0DDD8")
-_DARK = dict(SURFACE="#262624", INK="#ECEAE4", INK2="#C2C0B9", MUTED="#8E8C86", GRID="#3A3936",
-             HOVER="#33322F", TRACK="#3A3936")
+SURFACE = "#FFFFFF"
+INK, INK2, MUTED, GRID = "#1D1D1F", "#424245", "#8E8E93", "#E8E8ED"
+HOVER, TRACK = "#F2F2F7", "#E5E5EA"           # hovered legend row; the empty part of a mini bar
+
+_LIGHT = dict(SURFACE="#FFFFFF", INK="#1D1D1F", INK2="#424245", MUTED="#8E8E93", GRID="#E8E8ED",
+              HOVER="#F2F2F7", TRACK="#E5E5EA")
+_DARK = dict(SURFACE="#1C1C1E", INK="#F5F5F7", INK2="#D1D1D6", MUTED="#8E8E93", GRID="#38383A",
+             HOVER="#2C2C2E", TRACK="#38383A")
 
 def set_theme(dark):
     """Chart text, gridlines and backgrounds for the app's light or dark look.
@@ -187,7 +189,27 @@ def _font(px, bold=False):
     return f
 
 
-class _Chart(QWidget):
+class _Grows:
+    """Charts made inside motion.entrance() grow in the first time they're shown (a donut
+    sweeps round, bars grow from their baseline); `_t` goes 0 → 1 on a spring."""
+
+    def _init_grow(self):
+        self._t = 0.0 if motion.entering() else 1.0
+        self._delay = motion.next_delay() if self._t < 1 else 0
+        self._grew = False
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self._t < 1 and not self._grew:
+            self._grew = True
+            motion.grow(self, self._set_t, delay=self._delay)
+
+    def _set_t(self, t):
+        self._t = t
+        self.update()
+
+
+class _Chart(_Grows, QWidget):
     picked = pyqtSignal(object)          # whatever the mark carries (e.g. (group, status))
 
     def __init__(self, parent=None):
@@ -195,6 +217,7 @@ class _Chart(QWidget):
         self.setMouseTracking(True)
         self._marks = []                 # [(QPainterPath or QRectF, tooltip, payload)]
         self._hover = None
+        self._init_grow()
 
     def _hit(self, pos):
         for i, (shape, _, _) in enumerate(self._marks):
@@ -266,8 +289,10 @@ class DonutChart(_Chart):
         start = 90.0
         # a slice and its legend row highlight together
         hv = self._hover % len(self.slices) if self._hover is not None else None
+        left = 360.0 * self._t                    # while it sweeps in, only this much is drawn
         for i, (label, n, color) in enumerate(self.slices):
-            span = -360.0 * n / total
+            span = -min(360.0 * n / total, max(left, 0.0))
+            left -= 360.0 * n / total
             path = QPainterPath()
             path.arcMoveTo(ring, start)
             path.arcTo(ring, start, span)
@@ -279,12 +304,14 @@ class DonutChart(_Chart):
                 c.setAlpha(110)
             p.setPen(QPen(QColor(SURFACE), 2) if len(self.slices) > 1 else Qt.NoPen)
             p.setBrush(c)
-            p.drawPath(path)
+            if span:
+                p.drawPath(path)
             pct = round(100 * n / total)
             self._marks.append((path, f"<b>{label or 'No status'}</b><br>{n} of {total} ({pct}%)", label))
             start += span
 
         big, small = self.center
+        p.setOpacity(min(1.0, self._t * 1.4))
         p.setPen(QColor(INK))
         p.setFont(_font(22, bold=True))
         mid = ring.center()
@@ -292,6 +319,7 @@ class DonutChart(_Chart):
         p.setPen(QColor(INK2))
         p.setFont(_font(11))
         p.drawText(QRectF(mid.x() - hole / 2, mid.y() + 6, hole, 16), Qt.AlignCenter, small)
+        p.setOpacity(1.0)
 
         # legend: swatch, label, count, percent — so color is never the only cue
         x0 = ring.right() + 24
@@ -357,7 +385,7 @@ class StackedBars(_Chart):
             for status, n, color in segs:
                 if not n:
                     continue
-                w = bar_w * n / top
+                w = bar_w * n / top * self._t
                 rect = QRectF(x, y + 6, max(w - 2, 1.5), self.ROW - 12)   # 2px gap between segments
                 i = len(self._marks)
                 c = QColor(color)
@@ -418,7 +446,7 @@ class DayColumns(_Chart):
             for status, n, color in segs:
                 if not n:
                     continue
-                seg_h = h * n / top
+                seg_h = h * n / top * self._t
                 rect = QRectF(x, y - seg_h + 1, col_w, max(seg_h - 2, 1.5))
                 i = len(self._marks)
                 c = QColor(color)
@@ -438,13 +466,14 @@ class DayColumns(_Chart):
                            f"{day.month}/{day.day}")
 
 
-class MiniBar(QWidget):
+class MiniBar(_Grows, QWidget):
     """A thin progress bar split by status class — used on the summary cards."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.segs = []
         self.setFixedHeight(8)
+        self._init_grow()
 
     def set_data(self, segs):
         self.segs = [s for s in segs if s[1] > 0]
@@ -465,7 +494,7 @@ class MiniBar(QWidget):
         clip.addRoundedRect(QRectF(self.rect()), 4, 4)
         p.setClipPath(clip)
         for _, n, color in self.segs:
-            w = self.width() * n / total
+            w = self.width() * n / total * self._t
             p.setBrush(QColor(color))
             p.drawRect(QRectF(x, 0, max(w - 2, 1), self.height()))
             x += w

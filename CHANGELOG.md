@@ -1,5 +1,14 @@
 # What's new
 
+## 2.4.0 (testing — `apple-ui` branch)
+- **A new Apple-style look**, light and dark: system neutrals and system blue, rounder cards and tiles, macOS-style buttons, fields, menus and thin scrollbars, and tabs as a segmented control.
+- **Motion** on critically damped springs (no bounce):
+  - the tab pill glides to the tab you pick;
+  - the page slides in from that side as the old one fades;
+  - dashboard cards rise in, in reading order, while donuts sweep round and bars grow — when you open the app, change the dates or view, or show/hide empty cards (not on the background sync every minute).
+- Every motion can be interrupted mid-way and picks up from where it is. **Reduce Motion** in macOS turns it off.
+- Status and category colours, and exports, are unchanged.
+
 ## 2.3.8
 - **Dashboard hides cards with nothing to show in the dates.**
   - **A run tracker with no runs in the dates:** its cards are hidden, and a line at the top says so (e.g. *No Viking runs in Mon Oct 26*).
