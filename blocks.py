@@ -258,30 +258,84 @@ def _tally(b, tabs, ctx):
     return [Part(title, tally, pick, wide=True)]
 
 
+def reason_column(tab):
+    """A run tracker's "Reason for Error Runs"-style dropdown, or None."""
+    if not store.is_run_tab(tab):
+        return None
+    return next((c for c in tab["columns"] if store.wants_pie(c) and not store.is_workflow(c)), None)
+
+def _why(pairs, status):
+    """Why a day's failed runs failed: [(reason, n, color)] in the reason donut's colours,
+    for the (tab, row)s of one status segment. None unless the status counts as failed."""
+    if charts.classify(status) not in store.FAILED:
+        return None
+    counts, options, name = Counter(), [], None
+    for tab, r in pairs:
+        col = reason_column(tab)
+        if not col:
+            continue
+        name = name or col["name"]
+        options += [o for o in col["options"] if o not in options]
+        counts.update(v for v in _split(tab, col, store.value_of(tab, r, col)) if v)
+    if not counts:
+        return None
+    order = [v for v in options if v in counts] + sorted(v for v in counts if v not in options)
+    return [(v, counts[v], charts.category_color(name, v)) for v in order]
+
+def _day_versions(seg_pairs):
+    """{date: Counter(software version)} from {(date, status): [(tab, row)]}."""
+    out = defaultdict(Counter)
+    for (d, _), pairs in seg_pairs.items():
+        for tab, r in pairs:
+            col = next((c for c in tab["columns"] if store.is_version(c)), None) if store.is_run_tab(tab) else None
+            v = store.value_of(tab, r, col).strip() if col else ""
+            if v:
+                out[d][v] += 1
+    return out
+
+def _why_legend(why, tabs):
+    seen = {}
+    for parts in why.values():
+        for v, _, c in parts:
+            seen.setdefault(v, c)
+    if not seen:
+        return None
+    options = [o for t in tabs for c in [reason_column(t)] if c for o in c["options"]]
+    order = [o for o in dict.fromkeys(options) if o in seen] + [v for v in seen if v not in options]
+    return (f'<span style="font-size:11px; color:{MUTED}">Why it errored (stripe inside the bar):</span>'
+            f'&nbsp;&nbsp; ' + _legend(order, seen))
+
 def _days(b, tabs, ctx):
     tab = tabs[0]
     dcol = lay.find_column(tab, b.get("column")) or store.date_column(tab)
     status, colors = charts.tab_colors(tab, ctx.rows(tab))
     if not dcol:
         return None
-    days, raw = defaultdict(Counter), defaultdict(set)
+    days, raw, seg_rows = defaultdict(Counter), defaultdict(set), defaultdict(list)
     for r in _counted_rows(tab, b, ctx):
         d = store.parse_date(r["values"][dcol["pos"]])
         if d:
-            days[d][store.row_status(tab, r) if status else "Rows"] += 1
+            s = store.row_status(tab, r) if status else "Rows"
+            days[d][s] += 1
             raw[d].add(r["values"][dcol["pos"]])
+            seg_rows[(d, s)].append((tab, r))
     if not days:
         return None
     order = charts.status_order({s for g in days.values() for s in g}, status["options"] if status else [])
+    why = {k: w for k, pairs in seg_rows.items() if status for w in [_why(pairs, k[1])] if w}
     chart = charts.DayColumns()
-    chart.set_data([(d, [(v, days[d][v], colors.get(v, charts.PROGRESS)) for v in order]) for d in sorted(days)])
+    chart.set_data([(d, [(v, days[d][v], colors.get(v, charts.PROGRESS)) for v in order]) for d in sorted(days)],
+                   why, _day_versions(seg_rows))
 
     def pick(ds, t=tab, dp=dcol["pos"]):
         f = {dp: raw[ds[0]]}
         if status:
             f[store.STATUS] = {ds[1]}
         return "filters", t, f
-    return [Part(f"Per day ({dcol['name']})", chart, pick, wide=True)]
+    title, legend = f"Per day ({dcol['name']})", _why_legend(why, [tab])
+    if legend is None:
+        return [Part(title, chart, pick, wide=True)]
+    return [Part(title, [Part("", chart, pick, wide=True), Part("", legend)], wide=True)]
 
 
 def _cell_html(tab, r, col, colors):
@@ -850,10 +904,22 @@ def _sql(b, tabs, ctx):
     colors = _query_colors(b, cols[si] if si is not None else "", series_vals) if si is not None else \
         {series_vals[0]: charts.PROGRESS} if series_vals else {}
     legend = _legend(series_vals, colors) if si is not None else None
+    why, seg_pairs = {}, {}
+    tab_of = {t["title"]: t for t in ctx_tabs(db)}
+    for key, refs in refs_of.items():
+        seg_pairs[key] = [(tab_of[title], r) for title, rs in db.rows_for(refs).items() if title in tab_of for r in rs]
+    if si is not None and "status" in (b.get("color_by") or cols[si]).lower():
+        for key, pairs in seg_pairs.items():
+            w = _why(pairs, key[1])
+            if w:
+                why[key] = w
     chart = charts.DayColumns()
     chart.set_data([(d, [(s, days[d].get(s, 0), colors.get(s, charts.PROGRESS)) for s in series_vals])
-                    for d in sorted(days)])
+                    for d in sorted(days)], why, _day_versions(seg_pairs))
     pick = lambda ds, db=db, m=refs_of: _refs_pick(db)(m.get(tuple(ds), []))
+    why_legend = _why_legend(why, ctx_tabs(db))
+    if why_legend:
+        legend = (legend + "<br>" if legend else "") + why_legend
     if legend is None:
         return [Part(title, chart, pick, wide=True)]
     return [Part(title, [Part("", chart, pick, wide=True), Part("", legend)], wide=True)]

@@ -186,7 +186,7 @@ class Kit:
     def donut(self, slices, big, small, width, d=156):
         """A donut with a legend of label, count and % — beside it, or under it when the
         column is too narrow."""
-        slices = [(l or "No status", n, c) for l, n, c in slices if n > 0]      # exactly as in the sheet
+        slices = sorted(((l or "No status", n, c) for l, n, c in slices if n > 0), key=lambda s: -s[1])  # most first
         total = sum(n for _, n, _ in slices) or 1
         lf, cf = font(15), font(15)
         fm, cfm = QFontMetrics(lf), QFontMetrics(cf)

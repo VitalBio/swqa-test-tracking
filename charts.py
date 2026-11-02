@@ -8,7 +8,7 @@ Every mark shows a tooltip on hover and emits `picked` when clicked, which the
 app uses to jump to the matching rows in the table.
 """
 
-import math
+import html, math
 from collections import Counter
 
 from PyQt5.QtWidgets import QWidget, QToolTip, QSizePolicy
@@ -262,7 +262,7 @@ class DonutChart(_Chart):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
     def set_data(self, slices, center=("", "")):
-        self.slices = [s for s in slices if s[1] > 0]
+        self.slices = sorted((s for s in slices if s[1] > 0), key=lambda s: -s[1])   # most first
         self.center = center
         self.setFixedHeight(max(170, 24 * len(self.slices) + 30))
         fm, bold = QFontMetrics(_font(12)), QFontMetrics(_font(12, bold=True))
@@ -405,17 +405,55 @@ class StackedBars(_Chart):
 
 
 class DayColumns(_Chart):
-    """days: [(date, [(status, count, color), …])] — one column per day, oldest first."""
+    """days: [(date, [(status, count, color), …])] — one column per day, oldest first.
+    why: {(date, status): [(reason, count, color), …]} — drawn as a narrow stack inside
+    that segment, so an error bar shows why those runs errored.
+    versions: {date: Counter(version)} — a timeline above the columns: one span per
+    version, from the first day it was run to the last (overlapping ones get a lane each)."""
+
+    LANE = 18
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.days = []
+        self.why = {}
+        self.spans = []                 # [(version, first index, last index, runs, lane)]
         self.setFixedHeight(170)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-    def set_data(self, days):
+    def set_data(self, days, why=None, versions=None):
         self.days = days
+        self.why = why or {}
+        self.spans = self._spans(versions or {})
+        lanes = max((sp[4] for sp in self.spans), default=-1) + 1
+        self.setFixedHeight(170 + (lanes * self.LANE + 6 if lanes else 0))
         self.update()
+
+    def _spans(self, versions):
+        at = {d: k for k, (d, _) in enumerate(self.days)}
+        first, last, runs = {}, {}, Counter()
+        for d, counts in versions.items():
+            if d not in at:
+                continue
+            for v, n in counts.items():
+                if not v:
+                    continue
+                first[v] = min(first.get(v, at[d]), at[d])
+                last[v] = max(last.get(v, at[d]), at[d])
+                runs[v] += n
+        spans, ends = [], []                       # ends[lane] = last index used in that lane
+        for v in sorted(first, key=lambda v: (first[v], last[v])):
+            lane = next((i for i, e in enumerate(ends) if e < first[v]), len(ends))
+            if lane == len(ends):
+                ends.append(-1)
+            ends[lane] = last[v]
+            spans.append((v, first[v], last[v], runs[v], lane))
+        return spans
+
+    def mousePressEvent(self, e):
+        i = self._hit(e.pos())
+        if i is not None and self._marks[i][2] is not None:
+            super().mousePressEvent(e)
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -424,9 +462,36 @@ class DayColumns(_Chart):
         if not self.days:
             self._empty(p, "No dated rows yet")
             return
-        left, bottom, top_pad = 28, 22, 8
+        lanes = max((sp[4] for sp in self.spans), default=-1) + 1
+        band = lanes * self.LANE + 6 if lanes else 0
+        left, bottom, top_pad = 28, 22, 8 + band
         h = self.height() - bottom - top_pad
         top = max(sum(n for _, n, _ in segs) for _, segs in self.days) or 1
+        slot = (self.width() - left) / len(self.days)
+        hover_span = None
+        if self._hover is not None and self._hover < len(self.spans):
+            hover_span = self.spans[self._hover]
+        for v, a, b, runs, lane in self.spans:     # the version timeline
+            x0, x1 = left + slot * a + 2, left + slot * (b + 1) - 2
+            r = QRectF(x0, 4 + lane * self.LANE, x1 - x0, self.LANE - 4)
+            lit = hover_span is None or hover_span[0] == v
+            fill = QColor(PROGRESS)
+            fill.setAlpha((70 if is_dark() else 40) if lit else 18)
+            p.setPen(Qt.NoPen)
+            p.setBrush(fill)
+            p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+            p.setPen(QPen(QColor(PROGRESS), 1, Qt.DotLine))   # where it starts, down through the plot
+            p.drawLine(QPointF(x0, r.bottom()), QPointF(x0, top_pad + h))
+            p.setPen(QColor(INK if lit else MUTED))
+            p.setFont(_font(10, QFont.DemiBold) if lit else _font(10))
+            label = v.split("-")[0]
+            fm = QFontMetrics(p.font())
+            if fm.horizontalAdvance(label) > r.width() - 8:
+                label = fm.elidedText(label, Qt.ElideRight, max(int(r.width() - 8), 0))
+            p.drawText(r.adjusted(6, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft, label)
+            d0, d1 = self.days[a][0], self.days[b][0]
+            when = f"{d0:%b %-d}" + (f" – {d1:%b %-d}" if b != a else "")
+            self._marks.append((r, f"<b>{html.escape(v)}</b><br>{runs} run{'s' if runs != 1 else ''} · {when}", None))
         step = max(1, math.ceil(top / 4))
         # recessive gridlines + y labels
         p.setFont(_font(10))
@@ -436,7 +501,6 @@ class DayColumns(_Chart):
             p.drawLine(QPointF(left, yy), QPointF(self.width(), yy))
             p.setPen(QColor(MUTED))
             p.drawText(QRectF(0, yy - 7, left - 6, 14), Qt.AlignRight | Qt.AlignVCenter, str(v))
-        slot = (self.width() - left) / len(self.days)
         col_w = min(28, slot * 0.7)
         label_every = max(1, math.ceil(46 / slot))
         for k, (day, segs) in enumerate(self.days):
@@ -450,20 +514,46 @@ class DayColumns(_Chart):
                 rect = QRectF(x, y - seg_h + 1, col_w, max(seg_h - 2, 1.5))
                 i = len(self._marks)
                 c = QColor(color)
-                if self._hover is not None and self._hover != i:
+                if hover_span is not None:
+                    if not hover_span[1] <= k <= hover_span[2]:
+                        c.setAlpha(120)
+                elif self._hover is not None and self._hover != i:
                     c.setAlpha(120)
                 p.setPen(Qt.NoPen)
                 p.setBrush(c)
                 p.drawRoundedRect(rect, 2, 2)
+                why = self.why.get((day, status))
+                if why:
+                    self._draw_why(p, rect, why, dim=c.alpha() < 255)
+                tip = "".join(f"<br><span style='color:{rc}'>■</span> {html.escape(r)}: {k}"
+                              for r, k, rc in why or ())
                 self._marks.append((rect.adjusted(-3, 0, 3, 0),
                                     f"<b>{day:%a %b %-d}</b> · {status or 'No status'}<br>"
-                                    f"{n} of {total} that day", (day, status)))
+                                    f"{n} of {total} that day" + (f"<br><i>Why:</i>{tip}" if tip else ""),
+                                    (day, status)))
                 y -= seg_h
             if k % label_every == 0:
                 p.setPen(QColor(MUTED))
                 p.setFont(_font(10))
                 p.drawText(QRectF(x - 20, top_pad + h + 4, col_w + 40, 16), Qt.AlignCenter,
                            f"{day.month}/{day.day}")
+
+    @staticmethod
+    def _draw_why(p, rect, why, dim=False):
+        """The reasons, stacked bottom-up in a narrow strip down the middle of the segment."""
+        inner = rect.adjusted(rect.width() * 0.25, 2, -rect.width() * 0.25, -2)
+        if inner.height() < 2:
+            return
+        total = sum(k for _, k, _ in why) or 1
+        y = inner.bottom()
+        for _, k, color in why:
+            piece = inner.height() * k / total
+            c = QColor(color)
+            if dim:
+                c.setAlpha(120)
+            p.setBrush(c)
+            p.drawRoundedRect(QRectF(inner.left(), y - piece + 0.5, inner.width(), max(piece - 1, 1)), 1.5, 1.5)
+            y -= piece
 
 
 class MiniBar(_Grows, QWidget):
