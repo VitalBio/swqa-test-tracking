@@ -1,11 +1,14 @@
 # What's new
 
-## 2.4.1 (testing — `apple-ui` branch)
+## 2.4.2
+The Apple-style look, motion and chart changes from the 2.4.0 and 2.4.1 testing builds, for everyone.
+
+## 2.4.1 (testing)
 - **Runs per day shows why runs errored.** Each error (and no-results / cancelled) segment gets a narrow strip down its middle, split by *Reason for Error Runs* in the same colours as the reason donut. A second legend line names them, and hovering a segment lists the reasons with counts.
 - **A software version timeline above Runs per day.** Each version is a bar from the first day it was run to the last (overlapping versions get a row each), with a dotted line where it starts. Hover one for the full version, its run count and dates; the days outside it fade.
 - **Pie chart legends go from most to least**, in the app and in exports (the ring follows the same order).
 
-## 2.4.0 (testing — `apple-ui` branch)
+## 2.4.0 (testing)
 - **A new Apple-style look**, light and dark: system neutrals and system blue, rounder cards and tiles, macOS-style buttons, fields, menus and thin scrollbars, and tabs as a segmented control.
 - **Motion** on critically damped springs (no bounce):
   - the tab pill glides to the tab you pick;
