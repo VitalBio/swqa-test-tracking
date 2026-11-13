@@ -43,22 +43,66 @@ SECTIONS = {
     "changelog": ("Change Log", [("counts", "Category Counts", True), ("qa", "In QA", True)]),
 }
 
-def default_config():
-    return {"order": list(SECTIONS), "on": {"e2e": True, "errors": True, "bugs": True, "testing": True,
-                                            "changelog": False},
-            "opts": {sid: {k: d for k, _, d in opts} for sid, (_, opts) in SECTIONS.items()},
+# ── card sections: a run tracker that isn't an end-to-end one (e.g. New Disc Trays) ──
+# gets a section of its own, drawn from its dashboard card, with a tick for each chart.
+
+CARD = "card:"
+
+def is_e2e(tab):
+    """VitalOne / Viking End-to-End Tracker — the runs the End-to-End sections are about."""
+    t = tab["title"].lower()
+    return "end-to-end" in t or "end to end" in t or "e2e" in store._words(t)
+
+def card_tabs(data):
+    return [t for t in (data or {}).get("tabs", []) if store.is_run_tab(t) and not is_e2e(t)]
+
+def card_blocks(tab, settings):
+    """[(block id, title)] — the charts on a tab's dashboard cards."""
+    out = []
+    for card in lay.layout_for(tab, settings)["cards"]:
+        if not card.get("dash", True):
+            continue
+        for b in card["blocks"]:
+            if b.get("dash", True) and b["id"] not in {i for i, _ in out}:
+                out.append((b["id"], b.get("title") or lay.auto_title(tab, b)))
+    return out
+
+def sections_for(data=None):
+    """SECTIONS plus a card section for each tab in card_tabs."""
+    out = dict(SECTIONS)
+    for t in card_tabs(data):
+        try:
+            opts = [(i, title, True) for i, title in card_blocks(t, data.get("settings"))]
+        except Exception:
+            opts = []
+        out[CARD + t["title"]] = (blocks.short_name(t["title"]), opts)
+    return out
+
+def section_name(sid, data=None):
+    if sid in SECTIONS:
+        return SECTIONS[sid][0]
+    return blocks.short_name(sid[len(CARD):]) if sid.startswith(CARD) else sid
+
+def default_config(data=None):
+    secs = sections_for(data)
+    return {"order": list(secs), "on": {"e2e": True, "errors": True, "bugs": True, "testing": True,
+                                        "changelog": False, **{s: True for s in secs if s.startswith(CARD)}},
+            "opts": {sid: {k: d for k, _, d in opts} for sid, (_, opts) in secs.items()},
             "products": {}, "split": True}
 
-def normalized(cfg):
-    """A config with everything filled in (older or partial ones too)."""
-    base = default_config()
+def normalized(cfg, data=None):
+    """A config with everything filled in (older or partial ones too). Without `data`,
+    card sections already in the config are kept as they are."""
     cfg = dict(cfg or {})
-    order = [s for s in cfg.get("order", []) if s in SECTIONS]
-    base["order"] = order + [s for s in SECTIONS if s not in order]
-    base["on"].update({k: bool(v) for k, v in (cfg.get("on") or {}).items() if k in SECTIONS})
+    base = default_config(data)
+    known = set(base["order"]) if data is not None else \
+        set(SECTIONS) | {s for s in cfg.get("order", []) if s.startswith(CARD)}
+    order = [s for s in cfg.get("order", []) if s in known]
+    base["order"] = order + [s for s in base["order"] if s not in order]
+    base["on"].update({k: bool(v) for k, v in (cfg.get("on") or {}).items() if k in known})
     for sid, opts in (cfg.get("opts") or {}).items():
-        if sid in base["opts"]:
-            base["opts"][sid].update({k: bool(v) for k, v in opts.items()})
+        if sid in known:
+            base["opts"].setdefault(sid, {}).update({k: bool(v) for k, v in opts.items()})
     base["products"] = dict(cfg.get("products") or {})
     base["split"] = cfg.get("split", True)
     return base
@@ -67,8 +111,9 @@ def normalized(cfg):
 # ── products ──────────────────────────────────────────────────────────────────
 
 def run_products(data):
-    """[(name, run tab)] — e.g. VitalOne and Viking."""
-    return [(blocks.short_name(t["title"]), t) for t in data.get("tabs", []) if store.is_run_tab(t)]
+    """[(name, run tab)] — e.g. VitalOne and Viking (end-to-end trackers; other run
+    trackers like New Disc Trays get a card section of their own)."""
+    return [(blocks.short_name(t["title"]), t) for t in data.get("tabs", []) if store.is_run_tab(t) and is_e2e(t)]
 
 def product_names(data):
     names = [n for n, _ in run_products(data)]

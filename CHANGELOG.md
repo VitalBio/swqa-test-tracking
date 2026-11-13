@@ -1,5 +1,9 @@
 # What's new
 
+## 2.4.4
+- **Other run trackers get their own export card.** In the export's Sections, a run tracker that isn't an end-to-end one (e.g. New Disc Trays) is no longer lumped in with VitalOne/Viking under End-to-End Runs; it's a section of its own, drawn from its dashboard card, with a tick for each chart on it. Move it up or down like any other section.
+- Includes 2.4.3 (Chart colours covers custom charts), which never finished publishing.
+
 ## 2.4.3
 - **Chart colours covers custom charts.** Columns that a query chart is coloured by (e.g. Disc Pack Insertion, Reused Discs?) now show up in ⚙ → Chart colours, so their values can be recoloured.
 

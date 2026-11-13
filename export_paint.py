@@ -384,7 +384,10 @@ class Painter(es.Renderer):
         self.k = Kit(theme)
 
     def build(self, sid, width):
-        made = getattr(self, "b_" + sid)(width)
+        if sid.startswith(es.CARD):
+            made = self.b_card(sid[len(es.CARD):], width)
+        else:
+            made = getattr(self, "b_" + sid)(width)
         if made is None:
             return None
         title, sub, body = made
@@ -420,6 +423,70 @@ class Painter(es.Renderer):
         if len(groups) == 1:
             return build(groups[0][0], groups[0][1], width)
         return hstack([lambda w, g=g: build(g[0], g[1], w) for g in groups], width, 36)
+
+    # a tracker's own card (e.g. New Disc Trays) ──────────────────────────────
+
+    def b_card(self, title, width):
+        tab = next((t for t in self.data.get("tabs", []) if t["title"] == title), None)
+        if tab is None:
+            return None
+        k, ctx, sid = self.k, self.ctx, es.CARD + title
+        wanted = self.cfg["opts"].get(sid, {})
+        by_id = {b["id"]: b for card in lay.layout_for(tab, ctx.settings)["cards"] for b in card["blocks"]}
+        donuts, wide = [], []
+        for bid, _ in es.card_blocks(tab, ctx.settings):
+            if not wanted.get(bid, True) or bid not in by_id:
+                continue
+            try:
+                parts = blocks.render(by_id[bid], [tab], ctx)
+            except Exception:
+                parts = None
+            for part in parts or []:
+                made = self._part(part, width, part.title)
+                if made is not None:
+                    (donuts if made[0] == "donut" else wide).append(made[1])
+        if not donuts and not wide:
+            return None
+        body = []
+        cols = 2 if width < 900 else 3
+        for i in range(0, len(donuts), cols):        # donuts side by side, the rest full width
+            row = donuts[i:i + cols]
+            row += [lambda w: spacer(0)] * (cols - len(row))
+            body.append(hstack(row, width, 36))
+        body += [build(width) for build in wide]
+        n = len(ctx.rows(tab))
+        return blocks.short_name(title), f"{n} run{'s' if n != 1 else ''} · {ctx.range_text}", vstack(body, 22)
+
+    def _part(self, part, width, title):
+        """A dashboard Part → ("donut" | "wide", builder(width) → Item), in this design."""
+        k, c = self.k, part.content
+        label = title or ""
+        if isinstance(c, list):                      # a chart with its legend underneath
+            built = [self._part(p, width, "") for p in c]
+            built = [b for b in built if b]
+            if not built:
+                return None
+            kind = built[0][0]
+            return kind, lambda w, bs=built: vstack(([k.label(label, w)] if label else [])
+                                                     + [b[1](w) for b in bs], 8)
+        if isinstance(c, str):                       # e.g. a legend: the dashboard's greys → this theme's
+            c = c.replace(f"color:{blocks.INK2}", f"color:{k.t['ink2']}").replace(
+                f"color:{blocks.MUTED}", f"color:{k.t['muted']}").replace("font-size:11px", "font-size:13px")
+            return "wide", lambda w, c=c: vstack(([k.label(label, w)] if label else []) + [k.rich(c, w, 13)], 6)
+        if isinstance(c, charts.DonutChart):
+            big, small = c.center
+            return "donut", lambda w: vstack(([k.label(label, w)] if label else [])
+                                             + [k.donut(c.slices, big, small, w)], 8)
+        if isinstance(c, (charts.StackedBars, charts.DayColumns)):
+            rows = c.groups if isinstance(c, charts.StackedBars) else \
+                [(f"{d:%a %b %-d}", segs) for d, segs in reversed(c.days)][:14]
+            rows = [(str(g) or "(blank)", [(n, col) for _, n, col in segs], sum(n for _, n, _ in segs))
+                    for g, segs in rows]
+            rows = [r for r in rows if r[2]]
+            if not rows:
+                return None
+            return "wide", lambda w: vstack(([k.label(label, w)] if label else []) + [k.bars(rows, w)], 6)
+        return None
 
     # End-to-End Runs ─────────────────────────────────────────────────────────
 

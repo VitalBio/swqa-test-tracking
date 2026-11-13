@@ -178,7 +178,7 @@ class Snapshot:
                               sheet_url=data.get("url", ""))
         self.kpis, self.donuts = [], []  # for the Slack summary
         self.planned = []
-        self.sections = export_sections.normalized(sections) if sections is not None else None
+        self.sections = export_sections.normalized(sections, data) if sections is not None else None
         if self.sections is not None:              # the simple export: sections, not cards
             on = [sid for sid in self.sections["order"] if self.sections["on"].get(sid)
                   and (not self.sections["opts"].get(sid) or any(self.sections["opts"][sid].values()))]  # all unticked: skip
@@ -197,7 +197,7 @@ class Snapshot:
 
     def card_titles(self):
         """{card key: title} for every card going into the export (for the arrange editor)."""
-        return {p["key"]: export_sections.SECTIONS[p["section"]][0] if "section" in p
+        return {p["key"]: export_sections.section_name(p["section"]) if "section" in p
                 else combined_title(p["card"], p["tabs"]) for p in self.planned}
 
     # ── page layouts ──────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ class Snapshot:
             pad = 28
             item = export_paint.Painter(self.data, self.ctx, self.sections, self.theme).build(
                 p["section"], width - 2 * pad)
-            title = export_sections.SECTIONS[p["section"]][0]
+            title = export_sections.section_name(p["section"])
             if item is None:
                 item = export_paint.vstack([export_paint.Kit(self.theme).heading(title, "", width - 2 * pad),
                                             export_paint.Kit(self.theme).note("Nothing to show.", width - 2 * pad)], 14)

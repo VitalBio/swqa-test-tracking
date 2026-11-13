@@ -50,7 +50,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.3"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.4"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -2392,10 +2392,12 @@ class SectionsPanel(QWidget):
     """The simple export: which products, and which sections (in order) with their options."""
     changed = pyqtSignal()
 
-    def __init__(self, products):
+    def __init__(self, products, data=None):
         super().__init__()
         self.products = products
-        self.cfg = export_sections.default_config()
+        self.data = data
+        self.sections = export_sections.sections_for(data)
+        self.cfg = export_sections.default_config(data)
         self._loading = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 6, 0, 0)
@@ -2439,7 +2441,7 @@ class SectionsPanel(QWidget):
         self.rows = {}
         order = self.cfg["order"]
         for i, sid in enumerate(order):
-            name, opts = export_sections.SECTIONS[sid]
+            name, opts = self.sections[sid]
             box = QFrame()
             box.setObjectName("tile")
             v = QVBoxLayout(box)
@@ -2475,6 +2477,10 @@ class SectionsPanel(QWidget):
                     grid.addWidget(c, k // 3, k % 3)
                 grid.setColumnStretch(3, 1)
                 v.addLayout(grid)
+            if sid.startswith(export_sections.CARD):
+                note = _small_label(f"The charts on the {name} dashboard card.", MUTED)
+                note.setContentsMargins(58, 0, 0, 0)
+                v.addWidget(note)
             if sid == "changelog":
                 note = _small_label("The latest change log made in the 📝 Change Log tab.", MUTED)
                 note.setContentsMargins(58, 0, 0, 0)
@@ -2485,7 +2491,7 @@ class SectionsPanel(QWidget):
 
     def load(self, cfg):
         self._loading = True
-        self.cfg = export_sections.normalized(cfg)
+        self.cfg = export_sections.normalized(cfg, self.data)
         for name, b in self.prod_boxes.items():
             b.setChecked(self.cfg["products"].get(name, True))
         (self.side if self.cfg["split"] else self.combined).setChecked(True)
@@ -2493,7 +2499,7 @@ class SectionsPanel(QWidget):
         self._loading = False
 
     def config(self):
-        cfg = export_sections.normalized(self.cfg)
+        cfg = export_sections.normalized(self.cfg, self.data)
         cfg["products"] = {n: b.isChecked() for n, b in self.prod_boxes.items()}
         cfg["split"] = self.side.isChecked()
         for sid, (on, boxes) in self.rows.items():
@@ -2658,8 +2664,8 @@ class ExportDialog(QDialog):
         self.arrange.changed.connect(self._profile_state)
         self.side_tabs = QTabWidget()
         self.side_tabs.setTabBar(ui_theme.segmented_tab_bar())
-        self.sections = SectionsPanel(export_sections.product_names(win.data))
-        self.sections.load(saved.get("sections") or export_sections.default_config())
+        self.sections = SectionsPanel(export_sections.product_names(win.data), win.data)
+        self.sections.load(saved.get("sections") or export_sections.default_config(win.data))
         self.sections.changed.connect(self._update)
         self.side_tabs.addTab(self.sections, "Sections")
         self.side_tabs.addTab(include, "What to include")
@@ -2712,7 +2718,7 @@ class ExportDialog(QDialog):
     def _default_settings(self):
         return {"preset": "Today", "style": "wide", "picks": {}, "arrangement": None,
                 "folder": self.folder, "view": views.MAIN, "content": "sections", "theme": "light",
-                "sections": export_sections.default_config()}
+                "sections": export_sections.default_config(self.win.data)}
 
     def _content_changed(self, *_, reset=True):
         simple = self.content.currentData() == "sections"
@@ -2766,7 +2772,7 @@ class ExportDialog(QDialog):
         self.content.setCurrentIndex(max(self.content.findData(p.get("content", "cards" if p.get("picks")
                                                                          else "sections")), 0))
         self.content.blockSignals(False)
-        self.sections.load(p.get("sections") or export_sections.default_config())
+        self.sections.load(p.get("sections") or export_sections.default_config(self.win.data))
         self.theme.setCurrentIndex(max(self.theme.findData(p.get("theme", "light")), 0))
         self._content_changed(reset=False)
         self.folder = p.get("folder") or self.folder
