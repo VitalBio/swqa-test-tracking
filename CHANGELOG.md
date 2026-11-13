@@ -1,5 +1,8 @@
 # What's new
 
+## 2.4.3
+- **Chart colours covers custom charts.** Columns that a query chart is coloured by (e.g. Disc Pack Insertion, Reused Discs?) now show up in ⚙ → Chart colours, so their values can be recoloured.
+
 ## 2.4.2
 The Apple-style look, motion and chart changes from the 2.4.0 and 2.4.1 testing builds, for everyone.
 

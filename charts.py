@@ -118,6 +118,9 @@ def register(data):
                     if b["type"] in ("pie", "count") and b.get("colors") != "subsystem" \
                             and not (b.get("column") or "@").startswith("@"):
                         charted.add(b["column"].strip().lower())
+                    by = (b.get("color_by") or "").strip().lower()
+                    if b["type"] == "sql" and by and "status" not in by and b.get("colors") != "subsystem":
+                        charted.add(by)                # a query chart coloured by one of the columns
         except Exception:
             pass
         for c in tab["columns"]:
