@@ -50,7 +50,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.5"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.6"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -2577,6 +2577,18 @@ class ExportDialog(QDialog):
         where = QHBoxLayout()
         where.addWidget(self.folder_lbl, 1)
         where.addWidget(pick)
+        self.name_edit = QLineEdit(saved.get("file_name") or "")
+        self.name_edit.setPlaceholderText(self.DEFAULT_NAME)
+        self.name_edit.setClearButtonEnabled(True)
+        self.name_edit.setToolTip("The name for the PNG and PDF (no extension). Fill-ins:\n"
+                                  "{sheet}  the sheet's title, e.g. v4.20 Test Tracker\n"
+                                  "{date}  the day or range, e.g. 2026-11-17 or 2026-11-10 to 2026-11-17\n"
+                                  "{profile}  this export profile's name\n"
+                                  "Leave it empty for the default.")
+        self.name_edit.textChanged.connect(self._update)
+        name_row = QHBoxLayout()
+        name_row.addWidget(self.name_edit, 1)
+        name_row.addWidget(_small_label("{sheet} {date} {profile}", MUTED))
 
         self.combine_row = QVBoxLayout()
         self.tree = QTreeWidget()
@@ -2646,6 +2658,7 @@ class ExportDialog(QDialog):
         layout_row.addWidget(self.theme)
         form.addRow("Layout", layout_row)
         form.addRow("Save to", where)
+        form.addRow("File name", name_row)
         left = QVBoxLayout()
         left.setSpacing(10)
         left.addWidget(intro)
@@ -2719,7 +2732,7 @@ class ExportDialog(QDialog):
     def _default_settings(self):
         return {"preset": "Today", "style": "wide", "picks": {}, "arrangement": None,
                 "folder": self.folder, "view": views.MAIN, "content": "sections", "theme": "light",
-                "sections": export_sections.default_config(self.win.data)}
+                "file_name": "", "sections": export_sections.default_config(self.win.data)}
 
     def _content_changed(self, *_, reset=True):
         simple = self.content.currentData() == "sections"
@@ -2741,6 +2754,7 @@ class ExportDialog(QDialog):
                 "theme": self.theme.currentData(),
                 "view": self.view_box.currentData(),
                 "picks": dict(self.picks), "folder": self.folder,
+                "file_name": self.name_edit.text().strip(),
                 "arrangement": self.arrange.arrangement() if self.arrange.custom else None}
 
     def _profile_settings(self, name):
@@ -2777,6 +2791,7 @@ class ExportDialog(QDialog):
         self.theme.setCurrentIndex(max(self.theme.findData(p.get("theme", "light")), 0))
         self._content_changed(reset=False)
         self.folder = p.get("folder") or self.folder
+        self.name_edit.setText(p.get("file_name") or "")
         self.picks = dict(p.get("picks") or {})
         self._fill_tree()
         arr = p.get("arrangement")
@@ -2789,9 +2804,11 @@ class ExportDialog(QDialog):
         self._update()
 
     def _same(self, a, b):
-        keys = ("preset", "style", "picks", "arrangement", "folder", "view", "content", "sections", "theme")
-        keys = [k for k in keys if k in (b or {})]   # profiles saved before an option existed don't count it
-        norm = lambda s: json.dumps({k: (s or {}).get(k) for k in keys}, sort_keys=True)
+        keys = ("preset", "style", "picks", "arrangement", "folder", "view", "content", "sections", "theme",
+                "file_name")
+        keys = [k for k in keys if k in (b or {}) or k == "file_name"]   # older profiles: an option they
+        norm = lambda s: json.dumps({k: (s or {}).get(k, "" if k == "file_name" else None)  # lack doesn't count
+                                     for k in keys}, sort_keys=True)
         return norm(a) == norm(b)
 
     def _profile_state(self, *_):
@@ -2967,12 +2984,21 @@ class ExportDialog(QDialog):
             return range_text(rng)
         return f"{name} ({range_text(rng).replace(f'{rng[0]:%a} ', '')})"
 
+    DEFAULT_NAME = "{sheet} snapshot {date}"
+
     def base_name(self):
+        """The export's file name (no extension), from the File name pattern."""
         rng = self.rng()
         when = "all dates" if rng is None else (f"{rng[0]:%Y-%m-%d}" if rng[0] == rng[1]
                                                 else f"{rng[0]:%Y-%m-%d} to {rng[1]:%Y-%m-%d}")
-        title = re.sub(r'[\\/:*?"<>|]', "-", self.win.data["title"])
-        return f"{title} snapshot {when}"
+        pattern = self.name_edit.text().strip() if hasattr(self, "name_edit") else ""
+        profile = self.profile.currentText() if hasattr(self, "profile") else ""
+        fills = {"sheet": self.win.data["title"], "date": when, "profile": profile}
+        name = re.sub(r"\{(\w+)\}", lambda m: fills.get(m.group(1).lower(), m.group(0)),
+                      pattern or self.DEFAULT_NAME)
+        name = re.sub(r'[\\/:*?"<>|]', "-", name).strip(" .")
+        name = re.sub(r"\.(png|pdf)$", "", name, flags=re.I)
+        return name or re.sub(r'[\\/:*?"<>|]', "-", f"{self.win.data['title']} snapshot {when}")
 
     def paths(self):
         base = os.path.join(self.folder, self.base_name())
@@ -4853,6 +4879,7 @@ class TrackerApp(QMainWindow):
         self._tab_at = 0
         self.tabs.currentChanged.connect(self._tab_motion)
         self.tabs.currentChanged.connect(self._unpeek)
+        QTimer.singleShot(0, self._place_tabs)          # tabs hidden on this computer
         self.empty = QLabel("Add your test-tracking Google Sheet in ⚙ Settings to get started.")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setStyleSheet(f"color:{MUTED}; font-size:14px;")
@@ -5039,12 +5066,15 @@ class TrackerApp(QMainWindow):
     def hidden_tabs(self):
         return self.cfg.setdefault("hidden_tabs", {}).setdefault(self.url or "", [])
 
+    def _builtin_tabs(self):
+        """(name, page, label) for the app's own tabs that can be hidden (not the Dashboard)."""
+        return [("Change Log", self.changelog_page, "📝 Change Log"),
+                ("Feature Testing", self.testing_page, "🧪 Feature Testing")]
+
     def _place_tabs(self, data=None):
-        """One page per sheet tab, after Dashboard, Change Log and Feature Testing, in the
-        sheet's order — leaving out the ones hidden on this computer."""
+        """After the Dashboard: Change Log, Feature Testing, then one page per sheet tab in
+        the sheet's order — leaving out the ones hidden on this computer."""
         data = data or self.data
-        if not data:
-            return
         hidden = set(self.hidden_tabs()) - {self._peek}
         self._placing = True
         try:
@@ -5053,24 +5083,29 @@ class TrackerApp(QMainWindow):
             self._placing = False
 
     def _place(self, data, hidden):
-        at = 3
-        for tab in data["tabs"]:
+        order = list(self._builtin_tabs())
+        for tab in (data or {}).get("tabs", []):
             page = self.pages.get(tab["title"])
             if page is None:
                 page = TabPage(self, tab)
                 self.pages[tab["title"]] = page
             elif page.model.tab is not tab:
                 page.set_tab(tab)
+            order.append((tab["title"], page, tab["title"]))
+        at = 1
+        for name, page, label in order:
             i = self.tabs.indexOf(page)
-            if tab["title"] in hidden:
+            if name in hidden:
                 if i >= 0:
-                    self.tabs.removeTab(i)
+                    if self.tabs.currentWidget() is page:
+                        self.tabs.setCurrentIndex(0)
+                    self.tabs.removeTab(self.tabs.indexOf(page))
                 continue
             if i != at:
                 if i >= 0:
                     self.tabs.removeTab(i)
-                self.tabs.insertTab(at, page, tab["title"])
-            if store.readonly_tab(tab):
+                self.tabs.insertTab(at, page, label)
+            if name in self.pages and store.readonly_tab(self.pages[name].model.tab):
                 self.tabs.setTabToolTip(at, "Filled in automatically; read-only here")
             at += 1
 
@@ -5084,8 +5119,9 @@ class TrackerApp(QMainWindow):
             self._peek = None
         store.save_config(self.cfg)
         self._place_tabs()
-        if not hide and title in self.pages:
-            self.tabs.setCurrentWidget(self.pages[title])
+        page = self.pages.get(title) or next((p for n, p, _ in self._builtin_tabs() if n == title), None)
+        if not hide and page is not None:
+            self.tabs.setCurrentWidget(page)
         self._set_status(f"Hid “{title}” from the top bar on this computer." if hide
                          else f"Showing “{title}” again.")
 
@@ -5109,11 +5145,14 @@ class TrackerApp(QMainWindow):
         bar = self.tabs.tabBar()
         i = bar.tabAt(pos)
         page = self.tabs.widget(i) if i >= 0 else None
-        title = next((t for t, p in self.pages.items() if p is page), None)
+        named = {p: n for n, p, _ in self._builtin_tabs()}
+        named.update({p: t for t, p in self.pages.items()})
+        title = named.get(page)                      # None for the Dashboard: it always stays
         menu = QMenu(self)
         if title:
             menu.addAction(f"Hide “{title}” from the top bar", lambda: self.set_tab_hidden(title, True))
-        hidden = [t for t in self.hidden_tabs() if t in self.pages]
+        known = set(named.values())
+        hidden = [t for t in self.hidden_tabs() if t in known]
         sub = menu.addMenu("Hidden tabs") if hidden else None
         for t in hidden:
             sub.addAction(f"Show “{t}”", lambda t=t: self.set_tab_hidden(t, False))

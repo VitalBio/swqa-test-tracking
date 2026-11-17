@@ -1,5 +1,9 @@
 # What's new
 
+## 2.4.6
+- **Hide Change Log and Feature Testing too** (right-click → Hide). Only the Dashboard always stays.
+- **Name your export files.** A File name field in Export (saved with each profile), with fill-ins {sheet}, {date} and {profile} — e.g. “EOD {date}” → EOD 2026-11-17.png / .pdf. Empty keeps the default “{sheet} snapshot {date}”.
+
 ## 2.4.5
 - **The sheet's data is read-only in the app.** No more Add row or Edit cell; lock your data tabs as you like. The app only writes its own hidden tabs (settings, and the JIRA feature-testing sync).
 - **A locked sheet no longer looks offline.** A save Google refuses used to switch the app to “Offline — showing last synced data” with a “share as Editor” message. Now it stays connected and says which hidden tab is locked and how to allow the app to save there.
