@@ -1,5 +1,9 @@
 # What's new
 
+## 2.4.9
+- **Hide dashboard cards.** Each card has a Hide link; Show ▾ (top of the dashboard, was Tiles ▾) ticks which tiles and cards show. Only on your computer.
+- **Bug Statuses: All / VitalOne / Viking / Split.** A switch on the card: all bugs together, one product, or each in its own section (as before). Remembered on your computer.
+
 ## 2.4.8
 - **Choose the dashboard's top tiles.** Tiles ▾ (next to “Data as of…”) ticks which tiles show; right-click a tile → Hide tile. Only on your computer.
 - **Change a tile's number.** Right-click a tile → Edit tile…: the same Simple form / SQL as charts. Show it as a percent of all (e.g. % failed, % done) or a number, with your own label. The status bar under it stays. “Use the built-in tile” goes back to % done.

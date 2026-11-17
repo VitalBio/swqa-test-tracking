@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.8"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.9"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -1235,6 +1235,22 @@ class AddChartDialog(QDialog):
             h.addWidget(lbl, 1)
         h.addStretch(0 if any(p.wide for p in parts) else 1)
         self.pv_chart.setWidget(box)
+
+
+def card_key(tab, card):
+    """How a dashboard card is named in this computer's settings (hidden cards, card views)."""
+    return f"{tab['title']}::{card['id']}"
+
+def _clear_layout(lay_):
+    while lay_.count():
+        it = lay_.takeAt(0)
+        w, sub = it.widget(), it.layout()
+        if w is not None:
+            w.setParent(None)
+            w.deleteLater()
+        elif sub is not None:
+            _clear_layout(sub)
+            sub.deleteLater()
 
 
 def tile_default_spec(tab):
@@ -4618,17 +4634,20 @@ class Dashboard(QScrollArea):
             tiles.addWidget(self._tile(tab), i // 4, i % 4)
         for c in range(min(4, len(shown))):
             tiles.setColumnStretch(c, 1)
-        tiles_btn = QPushButton("Tiles ▾")
+        tiles_btn = QPushButton("Show ▾")
         tiles_btn.setObjectName("link")
-        tiles_btn.setToolTip("Choose which tiles show (on this computer)")
+        tiles_btn.setToolTip("Choose which tiles and cards show (on this computer)")
         tiles_btn.clicked.connect(lambda: self._tiles_menu(tabs, tiles_btn))
         head.addWidget(tiles_btn, 0, Qt.AlignBottom)
         root.addLayout(tiles)
+        hidden_cards = set(self.win.hidden_cards())
 
         for tab in tabs:
             lo = self.win.layout_of(tab)
             for card in lo["cards"]:
                 if not card["dash"] or (card["id"] == "analysis" and not _visible_rows(tab)):
+                    continue
+                if card_key(tab, card) in hidden_cards and not self.is_editing(tab, card):
                     continue
                 if self._skip(tab, card):
                     continue
@@ -4662,7 +4681,10 @@ class Dashboard(QScrollArea):
             v.addWidget(add, 0, Qt.AlignLeft)
             root.addWidget(box)
             return
+        hidden_cards = set(self.win.hidden_cards())
         for tab, card, lo, entry in got:
+            if card_key(tab, card) in hidden_cards and not self.is_editing(tab, card):
+                continue
             if self._skip(tab, card):
                 continue
             try:
@@ -4746,13 +4768,28 @@ class Dashboard(QScrollArea):
     def _tiles_menu(self, tabs, btn):
         conf = self.win.tile_settings()
         menu = QMenu(self)
+        menu.addSection("Tiles")
         for t in tabs:
             a = menu.addAction(t["title"])
             a.setCheckable(True)
             a.setChecked(not (conf.get(t["title"]) or {}).get("hidden"))
             a.toggled.connect(lambda on, title=t["title"]: self.win.set_tile(title, hidden=not on))
+        menu.addSection("Cards")
+        hidden = set(self.win.hidden_cards())
+        keys = []
+        for t in tabs:
+            for card in self.win.layout_of(t)["cards"]:
+                if not card["dash"]:
+                    continue
+                key = card_key(t, card)
+                keys.append(key)
+                a = menu.addAction(layout.card_title(t, card))
+                a.setCheckable(True)
+                a.setChecked(key not in hidden)
+                a.toggled.connect(lambda on, k=key: self.win.set_card_hidden(k, not on))
         menu.addSeparator()
-        menu.addAction("Show all", lambda: [self.win.set_tile(t["title"], hidden=False) for t in tabs])
+        menu.addAction("Show all", lambda: (self.win.set_card_hidden(keys, False),
+                                            [self.win.set_tile(t["title"], hidden=False) for t in tabs]))
         menu.exec_(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     def _tile_menu(self, tile, tab):
@@ -4853,18 +4890,39 @@ class Dashboard(QScrollArea):
             done.clicked.connect(self.win.finish_editing)
             for w in (settings_btn, cancel, done):
                 head.addWidget(w)
-        elif linked:
+        groups = layout.split_groups(tab, card)
+        key = card_key(tab, card)
+        switch = hide = None
+        if groups and not editing and not preview:   # All / VitalOne / Viking / Split
+            modes = ["all"] + [n for n, _ in groups] + ["split"]
+            switch = ui_theme.segmented_tab_bar()
+            for m in modes:
+                switch.addTab({"all": "All", "split": "Split"}.get(m, m))
+            mode = self.win.card_view(key)
+            switch.setCurrentIndex(modes.index(mode) if mode in modes else len(modes) - 1)
+            switch.setToolTip("All together, one product, or each product in its own section")
+            head.addWidget(switch, 0, Qt.AlignVCenter)
+        if not editing and not preview:
+            hide = QPushButton("Hide")
+            hide.setObjectName("link")
+            hide.setToolTip("Hide this card on this computer (Show ▾ at the top brings it back)")
+            hide.clicked.connect(lambda: self.win.set_card_hidden(key, True))
+        if linked and not editing:
             head.addWidget(_small_label("from Main", MUTED), 0, Qt.AlignBottom)
+            if hide:
+                head.addWidget(hide)
             open_btn = QPushButton("Open table →")
             open_btn.setObjectName("link")
             open_btn.clicked.connect(lambda: self._go(tab["title"]))
             head.addWidget(open_btn)
-        elif not preview:
+        elif not preview and not editing:
             edit = QPushButton("✎ Edit")
             edit.setObjectName("link")
             edit.setToolTip("Add, move, resize and change this card's charts")
             edit.clicked.connect(lambda: self.win.start_editing(tab, card["id"]))
             head.addWidget(edit)
+            if hide:
+                head.addWidget(hide)
             open_btn = QPushButton("Open table →")
             open_btn.setObjectName("link")
             open_btn.clicked.connect(lambda: self._go(tab["title"]))
@@ -4876,23 +4934,43 @@ class Dashboard(QScrollArea):
                 lay_.addWidget(self._new_column_banner(tab, col))
 
         target = (lambda t: None) if (preview or editing) else self._target
-        groups = layout.split_groups(tab, card)
         if not groups or editing:
             if groups:
                 lay_.addWidget(_small_label(f"Shown once per section ({', '.join(n for n, _ in groups)}) "
                                             "when you're done.", MUTED))
             self._card_body(lay_, tab, card, lo, ctx, target, editing)
         else:
-            for name, test in groups:                  # labelled sections, same card
-                sub = ctx.section(test)
-                n = len(sub.all_rows(tab))
-                head = QLabel(f"{html.escape(name.upper())} <span style='color:{MUTED}; font-weight:normal'>"
-                              f"· {n} bug{'s' if n != 1 else ''}</span>")
-                head.setTextFormat(Qt.RichText)
-                head.setStyleSheet("font-size:12px; font-weight:bold; color:#1A1A18; padding-top:8px;"
-                                   "border-top:1px solid #ECEAE6;")
-                lay_.addWidget(head)
-                self._card_body(lay_, tab, card, lo, sub, target)
+            body = QWidget()
+            body_lay = QVBoxLayout(body)
+            body_lay.setContentsMargins(0, 0, 0, 0)
+            body_lay.setSpacing(10)
+            lay_.addWidget(body)
+
+            def draw(mode):
+                _clear_layout(body_lay)
+                picked = next((test for name, test in groups if name == mode), None)
+                if mode == "all" or (picked is None and mode != "split" and not preview):
+                    self._card_body(body_lay, tab, card, lo, ctx, target)
+                elif picked is not None:
+                    self._card_body(body_lay, tab, card, lo, ctx.section(picked), target)
+                else:
+                    for name, test in groups:          # labelled sections, same card
+                        sub = ctx.section(test)
+                        n = len(sub.all_rows(tab))
+                        lbl = QLabel(f"{html.escape(name.upper())} <span style='color:{MUTED}; "
+                                     f"font-weight:normal'>· {n} bug{'s' if n != 1 else ''}</span>")
+                        lbl.setTextFormat(Qt.RichText)
+                        lbl.setStyleSheet("font-size:12px; font-weight:bold; color:#1A1A18; padding-top:8px;"
+                                          "border-top:1px solid #ECEAE6;")
+                        body_lay.addWidget(lbl)
+                        self._card_body(body_lay, tab, card, lo, sub, target)
+            modes = ["all"] + [n for n, _ in groups] + ["split"]
+            draw(modes[switch.currentIndex()] if switch else "split")
+            if switch:
+                def switched(i):
+                    self.win.set_card_view(key, modes[i])
+                    draw(modes[i])
+                switch.currentChanged.connect(switched)
         if editing:
             add_row = QHBoxLayout()
             add = QPushButton("+ Add chart")
@@ -5367,6 +5445,36 @@ class TrackerApp(QMainWindow):
         store.save_config(self.cfg)
         if self.data:
             self.dashboard.set_data(self.data)
+
+    def hidden_cards(self):
+        return self.cfg.setdefault("hidden_cards", {}).setdefault(self.url or "", [])
+
+    def set_card_hidden(self, keys, hide):
+        keys = [keys] if isinstance(keys, str) else keys
+        cur = self.hidden_cards()
+        for k in keys:
+            if hide and k not in cur:
+                cur.append(k)
+            elif not hide and k in cur:
+                cur.remove(k)
+        store.save_config(self.cfg)
+        if self.data:
+            self.dashboard.set_data(self.data)
+        if hide and len(keys) == 1:
+            self._set_status(f"Hid {keys[0].split('::')[0]} card. Show ▾ (top of the dashboard) "
+                             "brings it back.")
+
+    def card_view(self, key):
+        """A split card's view on this computer: "all", a section name, or "split" (default)."""
+        return self.cfg.setdefault("card_views", {}).setdefault(self.url or "", {}).get(key, "split")
+
+    def set_card_view(self, key, mode):
+        views_ = self.cfg.setdefault("card_views", {}).setdefault(self.url or "", {})
+        if mode == "split":
+            views_.pop(key, None)
+        else:
+            views_[key] = mode
+        store.save_config(self.cfg)
 
     def edit_tile(self, tab):
         dlg = TileDialog(self, tab, self.tile_settings().get(tab["title"]))
