@@ -161,7 +161,7 @@ def describe_error(exc):
     if isinstance(exc, gspread.exceptions.APIError):
         code = exc.response.status_code
         if code == 403:
-            return "No permission to edit the Google Sheet." + share
+            return "Google Sheets said no permission." + share
         if code == 429:
             return "Google Sheets is rate-limiting requests. Wait a minute and try again."
         if code == 400:
@@ -172,6 +172,24 @@ def describe_error(exc):
     if isinstance(exc, (gauth.TransportError, OSError)):
         return "Couldn't reach Google Sheets. Check your internet connection."
     return f"{type(exc).__name__}: {exc}"
+
+def is_connection_error(exc):
+    """A problem reaching Google at all (offline, key gone) — not a refused save."""
+    import google.auth.exceptions as gauth
+    return isinstance(exc, (gauth.TransportError, gauth.RefreshError, OSError))
+
+def _locked(exc, tab):
+    """A save refused because the tab is protected: say exactly how to allow it."""
+    import gspread
+    if isinstance(exc, gspread.exceptions.APIError) and exc.response.status_code == 403:
+        email = service_account_email() or "the app's service account"
+        return TrackerError(
+            f"Couldn't save: the hidden “{tab}” tab is locked in the Google Sheet.\n\n"
+            f"The app keeps its own settings there (it never changes your data tabs). To allow it: "
+            f"in the sheet, Data → Protect sheets and ranges → click the protection on “{tab}” → "
+            f"Set permissions → add {email} as an editor (or remove that tab's protection). "
+            f"Your data tabs can stay locked.")
+    return exc
 
 
 # ── column helpers (shared with the UI) ───────────────────────────────────────
@@ -613,6 +631,8 @@ def chart_columns(tab, rows, settings=None, limit=3):
     out = [c for c in cols if column_on(tab, rows, c, "chart", settings)]
     return out[:limit] if limit else out
 
+DATA_READ_ONLY = True      # the sheet's data tabs are locked; the app only reads them
+
 def readonly_tab(tab):
     """Tabs filled in automatically (e.g. from Jira) are shown but not edited."""
     return "automated" in tab["title"].lower()
@@ -630,6 +650,14 @@ def _a1_col(n):              # 0-based column index → "A", "B", … "AA"
         n, r = divmod(n - 1, 26)
         s = chr(65 + r) + s
     return s
+
+
+def _overwrite(ws, rows, width):
+    """Write rows from A1 and blank out any old rows below, in one request (no clear
+    first, so a refused write leaves the tab as it was)."""
+    used = len(ws.col_values(1))
+    rows = rows + [[""] * width] * max(0, used - len(rows))
+    ws.update(rows, "A1", value_input_option="RAW")
 
 
 class SheetSource:
@@ -776,10 +804,12 @@ class SheetSource:
             self.book.batch_update({"requests": [{"updateSheetProperties": {
                 "properties": {"sheetId": ws.id, "hidden": True}, "fields": "hidden"}}]})
         width = max(len(r) for r in rows)
-        if ws.col_count < width or ws.row_count < len(rows):
-            ws.resize(rows=max(ws.row_count, len(rows) + 10), cols=max(ws.col_count, width))
-        ws.clear()
-        ws.update([r + [""] * (width - len(r)) for r in rows], "A1", value_input_option="RAW")
+        try:
+            if ws.col_count < width or ws.row_count < len(rows):
+                ws.resize(rows=max(ws.row_count, len(rows) + 10), cols=max(ws.col_count, width))
+            _overwrite(ws, [r + [""] * (width - len(r)) for r in rows], width)
+        except Exception as exc:
+            raise _locked(exc, TESTING_TAB) from exc
 
     def save_settings(self, settings):
         """Write the shared settings to the hidden settings tab (made on first use)."""
@@ -791,8 +821,12 @@ class SheetSource:
             self.book.batch_update({"requests": [{"updateSheetProperties": {
                 "properties": {"sheetId": ws.id, "hidden": True}, "fields": "hidden"}}]})
         rows = [["setting", "value"]] + [[k, v] for k, v in sorted(settings.items())]
-        ws.clear()
-        ws.update(rows, "A1", value_input_option="RAW")
+        try:
+            if ws.row_count < len(rows):
+                ws.resize(rows=len(rows) + 20)
+            _overwrite(ws, rows, 2)
+        except Exception as exc:
+            raise _locked(exc, SETTINGS_TAB) from exc
 
     @staticmethod
     def _current_layout(tab, fresh):

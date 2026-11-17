@@ -1,5 +1,11 @@
 # What's new
 
+## 2.4.5
+- **The sheet's data is read-only in the app.** No more Add row or Edit cell; lock your data tabs as you like. The app only writes its own hidden tabs (settings, and the JIRA feature-testing sync).
+- **A locked sheet no longer looks offline.** A save Google refuses used to switch the app to “Offline — showing last synced data” with a “share as Editor” message. Now it stays connected and says which hidden tab is locked and how to allow the app to save there.
+- Settings saves write over the old rows in one go instead of clearing the tab first, so a refused save can't leave it empty.
+- **Hide tabs from the top bar** (right-click a tab → Hide; right-click → Hidden tabs to bring one back). Only on your computer; the sheet isn't changed. Opening a hidden tab from a dashboard card shows it until you leave it.
+
 ## 2.4.4
 - **Other run trackers get their own export card.** In the export's Sections, a run tracker that isn't an end-to-end one (e.g. New Disc Trays) is no longer lumped in with VitalOne/Viking under End-to-End Runs; it's a section of its own, drawn from its dashboard card, with a tick for each chart on it. Move it up or down like any other section.
 - Includes 2.4.3 (Chart colours covers custom charts), which never finished publishing.

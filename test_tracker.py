@@ -50,7 +50,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.4"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.5"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -1438,7 +1438,8 @@ class TabModel(QAbstractTableModel):
 
     def editable(self, index):
         row, c = self.row(index.row()), index.column()
-        return self.page.win.can_edit and not store.readonly_tab(self.tab) and not row["locked"][c]
+        return (not store.DATA_READ_ONLY and self.page.win.can_edit and not store.readonly_tab(self.tab)
+                and not row["locked"][c])
 
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
@@ -2025,8 +2026,8 @@ class TabPage(QWidget):
         self.view.horizontalScrollBar().setValue(hscroll)
         ro = store.readonly_tab(tab)
         self.banner.setVisible(ro)
-        self.add_btn.setVisible(not ro)
-        self.edit_btn.setVisible(not ro)
+        self.add_btn.setVisible(not ro and not store.DATA_READ_ONLY)      # the sheet's data is read-only here
+        self.edit_btn.setVisible(not ro and not store.DATA_READ_ONLY)
         self.empty_chk.setVisible(any(store.is_blank(r) for r in tab["rows"]))
         self._update_counts()
         self._update_buttons()
@@ -2236,7 +2237,7 @@ class TabPage(QWidget):
         menu.exec_(self.view.viewport().mapToGlobal(pos))
 
     def add_row(self):
-        if not self.win.can_edit:
+        if not self.win.can_edit or store.DATA_READ_ONLY:
             return
         dlg = AddRowDialog(self, self.model.tab, self.model.tab["rows"])
         if dlg.exec_() != QDialog.Accepted:
@@ -4828,6 +4829,9 @@ class TrackerApp(QMainWindow):
         self.tabs.setTabBar(ui_theme.segmented_tab_bar())
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setDrawBase(False)       # no line under the tabs
+        self.tabs.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabs.tabBar().customContextMenuRequested.connect(self._tab_menu)
+        self._peek = None                           # a hidden tab opened for now (e.g. from "Open table")
         self.dashboard = Dashboard(self)
         self.date_bar = DateBar(self)
         dash_page = QWidget()
@@ -4848,6 +4852,7 @@ class TrackerApp(QMainWindow):
         self.tabs.currentChanged.connect(self._place_date_bar)
         self._tab_at = 0
         self.tabs.currentChanged.connect(self._tab_motion)
+        self.tabs.currentChanged.connect(self._unpeek)
         self.empty = QLabel("Add your test-tracking Google Sheet in ⚙ Settings to get started.")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setStyleSheet(f"color:{MUTED}; font-size:14px;")
@@ -5016,6 +5021,7 @@ class TrackerApp(QMainWindow):
         page = self.pages.get(title)
         if page is None:
             return
+        self._reveal(title)
         self.tabs.setCurrentWidget(page)
         page.go_to_cell(sheet_row, pos)
 
@@ -5023,9 +5029,101 @@ class TrackerApp(QMainWindow):
         page = self.pages.get(title)
         if page is None:
             return
+        self._reveal(title)
         self.tabs.setCurrentWidget(page)
         if filters:
             page.show_only(filters)
+
+    # ── hidden tabs (this computer only; the sheet is unchanged) ──────────────
+
+    def hidden_tabs(self):
+        return self.cfg.setdefault("hidden_tabs", {}).setdefault(self.url or "", [])
+
+    def _place_tabs(self, data=None):
+        """One page per sheet tab, after Dashboard, Change Log and Feature Testing, in the
+        sheet's order — leaving out the ones hidden on this computer."""
+        data = data or self.data
+        if not data:
+            return
+        hidden = set(self.hidden_tabs()) - {self._peek}
+        self._placing = True
+        try:
+            self._place(data, hidden)
+        finally:
+            self._placing = False
+
+    def _place(self, data, hidden):
+        at = 3
+        for tab in data["tabs"]:
+            page = self.pages.get(tab["title"])
+            if page is None:
+                page = TabPage(self, tab)
+                self.pages[tab["title"]] = page
+            elif page.model.tab is not tab:
+                page.set_tab(tab)
+            i = self.tabs.indexOf(page)
+            if tab["title"] in hidden:
+                if i >= 0:
+                    self.tabs.removeTab(i)
+                continue
+            if i != at:
+                if i >= 0:
+                    self.tabs.removeTab(i)
+                self.tabs.insertTab(at, page, tab["title"])
+            if store.readonly_tab(tab):
+                self.tabs.setTabToolTip(at, "Filled in automatically; read-only here")
+            at += 1
+
+    def set_tab_hidden(self, title, hide):
+        hidden = self.hidden_tabs()
+        if hide and title not in hidden:
+            hidden.append(title)
+        elif not hide and title in hidden:
+            hidden.remove(title)
+        if self._peek == title:
+            self._peek = None
+        store.save_config(self.cfg)
+        self._place_tabs()
+        if not hide and title in self.pages:
+            self.tabs.setCurrentWidget(self.pages[title])
+        self._set_status(f"Hid “{title}” from the top bar on this computer." if hide
+                         else f"Showing “{title}” again.")
+
+    def _reveal(self, title):
+        """Opening a hidden tab from the dashboard shows it for now, without un-hiding it."""
+        if title in self.hidden_tabs() and self._peek != title:
+            self._peek = title
+            self._place_tabs()
+            self._placing = True                    # the caller selects it next
+            QTimer.singleShot(0, lambda: setattr(self, "_placing", False))
+
+    def _unpeek(self, _=None):
+        """Leaving a hidden tab that was opened for now hides it again."""
+        if getattr(self, "_placing", False):
+            return
+        if self._peek and self.tabs.currentWidget() is not self.pages.get(self._peek):
+            self._peek = None
+            QTimer.singleShot(0, self._place_tabs)
+
+    def _tab_menu(self, pos):
+        bar = self.tabs.tabBar()
+        i = bar.tabAt(pos)
+        page = self.tabs.widget(i) if i >= 0 else None
+        title = next((t for t, p in self.pages.items() if p is page), None)
+        menu = QMenu(self)
+        if title:
+            menu.addAction(f"Hide “{title}” from the top bar", lambda: self.set_tab_hidden(title, True))
+        hidden = [t for t in self.hidden_tabs() if t in self.pages]
+        sub = menu.addMenu("Hidden tabs") if hidden else None
+        for t in hidden:
+            sub.addAction(f"Show “{t}”", lambda t=t: self.set_tab_hidden(t, False))
+        if not hidden:
+            none = menu.addAction("No hidden tabs")
+            none.setEnabled(False)
+        menu.addSeparator()
+        note = menu.addAction("Only on this computer; the sheet isn't changed")
+        note.setEnabled(False)
+        menu.exec_(bar.mapToGlobal(pos))
 
     # ── background runner ─────────────────────────────────────────────────────
 
@@ -5048,7 +5146,7 @@ class TrackerApp(QMainWindow):
     def _on_error(self, exc, note="Your change was not saved."):
         msg = store.describe_error(exc)
         self._set_status(msg.splitlines()[0])
-        if not isinstance(exc, store.TrackerError):
+        if store.is_connection_error(exc):          # a refused save isn't being offline
             self._set_conn("offline", msg)
         QMessageBox.warning(self, "Problem", f"{msg}\n\n{note}".strip())
 
@@ -5132,21 +5230,10 @@ class TrackerApp(QMainWindow):
         for title in list(self.pages):
             if title not in titles:
                 page = self.pages.pop(title)
-                self.tabs.removeTab(self.tabs.indexOf(page))
-                page.deleteLater()
-        for i, tab in enumerate(data["tabs"]):
-            page = self.pages.get(tab["title"])
-            if page is None:
-                page = TabPage(self, tab)
-                self.pages[tab["title"]] = page
-                self.tabs.insertTab(i + 3, page, tab["title"])     # after Dashboard, Change Log, Feature Testing
-            else:
-                page.set_tab(tab)
-                if self.tabs.indexOf(page) != i + 3:
+                if self.tabs.indexOf(page) >= 0:
                     self.tabs.removeTab(self.tabs.indexOf(page))
-                    self.tabs.insertTab(i + 3, page, tab["title"])
-            if store.readonly_tab(tab):
-                self.tabs.setTabToolTip(i + 1, "Filled in automatically; read-only here")
+                page.deleteLater()
+        self._place_tabs(data)
         self.date_bar.refresh()
         self.dashboard.set_data(data)
 
