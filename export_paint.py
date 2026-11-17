@@ -8,7 +8,7 @@ Each section is built as boxes that know their height for a given width, then dr
     item = build_section(...);  item.h;  item.draw(painter, x, y)
 """
 
-import html, math
+import html, math, re
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 
@@ -398,6 +398,12 @@ class Painter(es.Renderer):
     def link(self, text, url):
         return f'<a href="{esc(url, quote=True)}">{esc(text)}</a>' if url else esc(text)
 
+    def links(self, text, links):
+        """Text with each of its links (a cell can hold several) made an <a>."""
+        if len(links) <= 1:
+            return self.link(text, links[0][1] if links else "")
+        return re.sub(r' style="color:[^"]*"', "", store.links_html(text, links, "", esc))
+
     def status_slices(self, tabs, rows_of):
         counts, colors, options = Counter(), {}, []
         for t in tabs:
@@ -749,9 +755,10 @@ class Painter(es.Renderer):
             return k.note(empty, width)
         rows = []
         for r in sorted(items, key=lambda r: bugs.when(r, date_col) or date.min, reverse=True):
-            key, link = r["values"][bugs.key_col["pos"]], r["links"][bugs.key_col["pos"]]
+            key = r["values"][bugs.key_col["pos"]]
+            links = store.cell_links(r, bugs.key_col["pos"])
             tag = next((n for n, test in product_of.items() if test(r)), None) if product_of else None
-            rows.append(dict(link_html=("✓ " if done else "") + self.link(key, link), tag=None,
+            rows.append(dict(link_html=("✓ " if done else "") + self.links(key, links), tag=None,
                              text=bugs.val(r, bugs.summary_col) + (f"  ({tag})" if tag else ""),
                              right=bugs.st[id(r)], right_color="ink2"))
         return self._bug_rows(rows, width)

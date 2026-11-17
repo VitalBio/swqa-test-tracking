@@ -25,14 +25,16 @@ from PyQt5.QtWidgets import (
     QCheckBox, QTabWidget, QScrollArea, QStyledItemDelegate, QDateEdit, QMenu,
     QToolButton, QWidgetAction, QListWidget, QListWidgetItem, QPlainTextEdit,
     QAbstractItemView, QListView, QSizePolicy, QColorDialog, QInputDialog, QTreeWidget,
-    QTreeWidgetItem, QSplitter, QTableWidget, QTableWidgetItem, QTabBar, QTextBrowser, QRadioButton
+    QTreeWidgetItem, QSplitter, QTableWidget, QTableWidgetItem, QTabBar, QTextBrowser, QRadioButton,
+    QStyle, QStyleOptionViewItem
 )
 from PyQt5.QtCore import (
     Qt, QObject, QRunnable, QThreadPool, QTimer, QUrl, QDate, pyqtSignal,
-    QAbstractTableModel, QModelIndex, QSortFilterProxyModel
+    QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QPointF, QEvent
 )
 from PyQt5.QtGui import (
-    QFont, QColor, QPalette, QKeySequence, QDesktopServices, QPixmap, QPainter, QIcon
+    QFont, QColor, QPalette, QKeySequence, QDesktopServices, QPixmap, QPainter, QIcon,
+    QTextDocument, QAbstractTextDocumentLayout, QCursor
 )
 
 import blocks
@@ -50,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.6"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.7"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -172,6 +174,20 @@ def _breakable(text):
 def _open_link(url):
     if url:
         QDesktopServices.openUrl(QUrl(url))
+
+def _nowrap_option():
+    from PyQt5.QtGui import QTextOption
+    o = QTextOption()
+    o.setWrapMode(QTextOption.NoWrap)
+    return o
+
+def _links_menu(parent, links, title=None):
+    """A menu with one “Open …” item per link."""
+    menu = QMenu(title or "Open link", parent)
+    for text, url in links:
+        label = (text or url).replace("&", "&&")
+        menu.addAction(f"Open {label[:60]} ↗", lambda u=url: _open_link(u))
+    return menu
 
 _dots = {}
 def _dot(color):
@@ -1391,6 +1407,7 @@ class VersionsDialog(QDialog):
 # ── table model, sorting and filtering ────────────────────────────────────────
 
 SORT_ROLE = Qt.UserRole + 1
+LINKS_ROLE = Qt.UserRole + 2      # [(text, url), ...] for a cell with several links, else None
 
 class TabModel(QAbstractTableModel):
     """One sheet tab. Edits call `on_edit(snapshot, col, new, old)` and show at once."""
@@ -1447,6 +1464,10 @@ class TabModel(QAbstractTableModel):
         row, c = self.row(index.row()), index.column()
         col = self.tab["columns"][c]
         value, link = row["values"][c], row["links"][c]
+        many = store.cell_links(row, c) if row.get("spans") else []
+        many = many if len(many) > 1 else None
+        if role == LINKS_ROLE:
+            return many
         if role == Qt.DisplayRole:
             if self.page.wrap:
                 return _breakable(value)
@@ -1458,7 +1479,10 @@ class TabModel(QAbstractTableModel):
             return value
         if role == Qt.ToolTipRole:
             tip = value
-            if link:
+            if many:
+                tip += "\n\n" + "\n".join(f"🔗 {t}  {u.split('?', 1)[0]}" for t, u in many)
+                tip += "\nDouble-click a link to open it."
+            elif link:
                 tip += f"\n\n🔗 {link}\nDouble-click to open the link."
             if row["locked"][c]:
                 tip += "\n\nThis cell has a formula. Change it in the sheet."
@@ -1469,7 +1493,7 @@ class TabModel(QAbstractTableModel):
             if row["locked"][c]:
                 return QColor(MUTED)
             return None
-        if role == Qt.FontRole and link:
+        if role == Qt.FontRole and link and not many:
             f = QFont()
             f.setUnderline(True)
             return f
@@ -1651,6 +1675,63 @@ class CellDelegate(QStyledItemDelegate):
         line = option.fontMetrics.lineSpacing()
         size.setHeight(max(34, min(size.height() + 14, line * WRAP_MAX_LINES + 14)))
         return size
+
+    def _doc(self, option, index, links):
+        """The cell as rich text, each link drawn (and clickable) on its own."""
+        text = index.data(Qt.EditRole) or ""
+        if not self.page.wrap:
+            text = text.split("\n", 1)[0]
+        body = store.links_html(text, links, LINK).replace("\n", "<br>")
+        doc = QTextDocument()
+        doc.setDocumentMargin(0)
+        doc.setDefaultFont(option.font)
+        doc.setDefaultStyleSheet(f"a {{ color: {LINK}; text-decoration: underline; }}")
+        if not self.page.wrap:
+            doc.setDefaultTextOption(_nowrap_option())
+        doc.setHtml(f"<span style='color:{option.palette.text().color().name()}'>{body}</span>")
+        doc.setTextWidth(option.rect.width() - 8 if self.page.wrap else -1)
+        return doc
+
+    def _doc_origin(self, option, doc):
+        """Where plain text starts in this cell, so links line up with the other cells."""
+        style = option.widget.style() if option.widget else QApplication.style()
+        r = style.subElementRect(QStyle.SE_ItemViewItemText, option, option.widget)
+        margin = style.pixelMetric(QStyle.PM_FocusFrameHMargin, None, option.widget) + 1
+        y = r.top() + (0 if self.page.wrap else max(0, (r.height() - doc.size().height()) / 2))
+        return r.left() + margin, y
+
+    def paint(self, painter, option, index):
+        links = index.data(LINKS_ROLE)
+        if not links:
+            return super().paint(painter, option, index)
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        doc = self._doc(opt, index, links)
+        x, y = self._doc_origin(opt, doc)
+        painter.save()
+        painter.setClipRect(opt.rect)
+        painter.translate(x, y)
+        ctx = QAbstractTextDocumentLayout.PaintContext()
+        doc.documentLayout().draw(painter, ctx)
+        painter.restore()
+
+    def link_at(self, index, pos):
+        """The URL of the link under `pos` (viewport coordinates) in a several-links cell."""
+        links = index.data(LINKS_ROLE)
+        if not links:
+            return None
+        opt = QStyleOptionViewItem()
+        opt.initFrom(self.page.view.viewport())
+        opt.widget = self.page.view
+        opt.font = self.page.view.font()
+        opt.rect = self.page.view.visualRect(index)
+        self.initStyleOption(opt, index)
+        doc = self._doc(opt, index, links)
+        x, y = self._doc_origin(opt, doc)
+        return doc.documentLayout().anchorAt(QPointF(pos.x() - x, pos.y() - y)) or None
 
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
@@ -1939,6 +2020,8 @@ class TabPage(QWidget):
         self.view.setEditTriggers(QAbstractItemView.EditKeyPressed | QAbstractItemView.AnyKeyPressed)
         self.view.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.view.doubleClicked.connect(self._on_double_click)
+        self._dbl_pos = None
+        self.view.viewport().installEventFilter(self)
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._context_menu)
         self.view.selectionModel().currentChanged.connect(lambda *_: self._update_buttons())
@@ -2163,9 +2246,24 @@ class TabPage(QWidget):
         return (col["link"] or row["links"][col["pos"]] or col["pos"] in self.model.multi
                 or _is_long_text(col, self.model.tab["rows"]))
 
+    def eventFilter(self, obj, event):
+        # remember where a double-click landed (before doubleClicked fires), to know which link
+        if obj is self.view.viewport() and event.type() == QEvent.MouseButtonDblClick:
+            self._dbl_pos = event.pos()
+        return super().eventFilter(obj, event)
+
     def _on_double_click(self, idx):
         src, row, col = self._current()
         if row is None:
+            return
+        many = store.cell_links(row, col["pos"])
+        if len(many) > 1:
+            pos = self._dbl_pos or self.view.viewport().mapFromGlobal(QCursor.pos())
+            url = self.view.itemDelegate().link_at(idx, pos)
+            if url:
+                _open_link(url)
+            else:
+                _links_menu(self, many).exec_(QCursor.pos())
             return
         link = row["links"][col["pos"]]
         if link:
@@ -2211,7 +2309,12 @@ class TabPage(QWidget):
 
     def open_current_link(self):
         _, row, col = self._current()
-        if row:
+        if not row:
+            return
+        many = store.cell_links(row, col["pos"])
+        if len(many) > 1:
+            _links_menu(self, many).exec_(self.link_btn.mapToGlobal(self.link_btn.rect().bottomLeft()))
+        else:
             _open_link(row["links"][col["pos"]])
 
     def _context_menu(self, pos):
@@ -2226,7 +2329,11 @@ class TabPage(QWidget):
             menu.addAction("Edit…", self.edit_current)
             if value:
                 menu.addAction("Clear cell", lambda: self.model.setData(src, ""))
-        if link:
+        many = store.cell_links(row, col["pos"])
+        if len(many) > 1:
+            for text, url in many:
+                menu.addAction(f"Open {text.replace('&', '&&')[:60]} ↗", lambda u=url: _open_link(u))
+        elif link:
             menu.addAction("Open link ↗", lambda: _open_link(link))
         menu.addAction("Copy", lambda: QApplication.clipboard().setText(link if link and not value else value))
         if col["pos"] in self.filter_btns or col["kind"] in ("dropdown", "date") or value:

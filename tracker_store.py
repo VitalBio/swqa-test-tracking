@@ -323,17 +323,22 @@ def merge_issue(tab, rows, prefer=()):
     "_runs" lists every run in the chain, oldest first (its first run has the notes)."""
     preferred = [r for r in reversed(rows) if any(r is p for p in prefer)]
     order = preferred + [r for r in reversed(rows) if not any(r is p for p in preferred)]
-    merged = dict(rows[0], values=list(rows[0]["values"]), links=list(rows[0]["links"]))
+    merged = dict(rows[0], values=list(rows[0]["values"]), links=list(rows[0]["links"]),
+                  spans=list(rows[0].get("spans") or [[] for _ in rows[0]["values"]]))
+
+    def take(src, pos):
+        merged["values"][pos] = src["values"][pos]
+        merged["links"][pos] = src["links"][pos]
+        sp = src.get("spans") or []
+        merged["spans"][pos] = sp[pos] if pos < len(sp) else []
     for c in tab["columns"]:
         pick = next((r for r in order if r["values"][c["pos"]].strip()), None)
         if pick is not None:
-            merged["values"][c["pos"]] = pick["values"][c["pos"]]
-            merged["links"][c["pos"]] = pick["links"][c["pos"]]
+            take(pick, c["pos"])
     first = rows[0]                        # the issue is named after (and dated by) its first run
     for c in ([tab["columns"][0]] if tab["columns"] else []) + [run_name_column(tab), date_column(tab)]:
         if c is not None:
-            merged["values"][c["pos"]] = first["values"][c["pos"]]
-            merged["links"][c["pos"]] = first["links"][c["pos"]]
+            take(first, c["pos"])
     merged["_runs"] = rows
     return merged
 
@@ -640,6 +645,55 @@ def readonly_tab(tab):
 
 # ── Google Sheets ─────────────────────────────────────────────────────────────
 
+def _link_runs(text, runs):
+    """The linked pieces of a rich-text cell, in order: [[text, url], ...]. A cell can
+    hold several links (e.g. "PROD-8687 PROD-8688", each its own link). Run positions
+    count UTF-16 code units, like Google Sheets does."""
+    if not runs or not text:
+        return []
+    u = text.encode("utf-16-le")
+    n = len(u) // 2
+    out = []
+    for i, run in enumerate(runs):
+        start = run.get("startIndex", 0)
+        end = runs[i + 1].get("startIndex", n) if i + 1 < len(runs) else n
+        url = ((run.get("format") or {}).get("link") or {}).get("uri", "")
+        piece = u[2 * start:2 * end].decode("utf-16-le", "ignore")
+        if not url or not piece.strip():
+            continue
+        if out and out[-1][1] == url and out[-1][2] == start:
+            out[-1][0] += piece; out[-1][2] = end          # one link split across format runs
+        else:
+            out.append([piece, url, end])
+    return [[t.strip(), url] for t, url, _ in out]
+
+def cell_links(row, pos):
+    """Every link in a cell as [(text, url), ...]: several for a rich-text cell with more
+    than one link, else the cell's one link (its text being the whole cell)."""
+    spans = (row.get("spans") or [])
+    if isinstance(pos, int) and pos < len(spans) and spans[pos]:
+        return [tuple(x) for x in spans[pos]]
+    link = row["links"][pos] if isinstance(pos, int) else ""
+    return [(row["values"][pos], link)] if link else []
+
+def links_html(text, links, color, esc=None):
+    """Cell text as HTML with each linked piece made an <a>; the rest stays plain."""
+    import html as _h
+    esc = esc or _h.escape
+    if not links:
+        return esc(text)
+    out, at = [], 0
+    for piece, url in links:
+        i = text.find(piece, at) if piece else -1
+        if i < 0:
+            continue
+        out.append(esc(text[at:i]))
+        out.append(f'<a href="{_h.escape(url, quote=True)}" style="color:{color}">{esc(piece)}</a>')
+        at = i + len(piece)
+    if not at:                       # nothing matched: link the whole text to the first url
+        return f'<a href="{_h.escape(links[0][1], quote=True)}" style="color:{color}">{esc(text or "Open")}</a>'
+    return "".join(out) + esc(text[at:])
+
 def _quote(title):
     return "'" + title.replace("'", "''") + "'"
 
@@ -687,6 +741,7 @@ class SheetSource:
                 "includeGridData": "true",
                 "ranges": [_quote(s["properties"]["title"]) for s in wanted],
                 "fields": "sheets(properties.sheetId,data(rowData(values(formattedValue,hyperlink,"
+                          "textFormatRuns(startIndex,format/link/uri),"
                           "userEnteredValue/formulaValue,dataValidation/condition))))"})
             for s in got["sheets"]:
                 data = s.get("data") or [{}]
@@ -772,17 +827,20 @@ class SheetSource:
             c["link"] = "link" in c["name"].lower()      # e.g. "Run Name w/ Link", even before any links
         rows = []
         for r in range(first, last):
-            values, links, locked = [], [], []
+            values, links, locked, spans = [], [], [], []
             for c in columns:
                 cd = cell(r, c["index"])
                 formula = cd.get("userEnteredValue", {}).get("formulaValue", "")
-                values.append(cd.get("formattedValue", ""))
-                links.append(cd.get("hyperlink", ""))
+                value = cd.get("formattedValue", "")
+                runs = _link_runs(value, cd.get("textFormatRuns"))
+                values.append(value)
+                links.append(cd.get("hyperlink", "") or (runs[0][1] if runs else ""))
+                spans.append(runs if len(runs) > 1 else [])
                 # HYPERLINK() cells are just links; other formulas are calculated, so read-only
                 locked.append(bool(formula) and not formula.upper().startswith("=HYPERLINK("))
-                if cd.get("hyperlink"):
+                if links[-1]:
                     c["link"] = True
-            rows.append({"r": r, "values": values, "links": links, "locked": locked})
+            rows.append({"r": r, "values": values, "links": links, "locked": locked, "spans": spans})
         return {"id": props["sheetId"], "title": props["title"], "table_id": table_id,
                 "header_row": header, "columns": columns, "rows": rows}
 

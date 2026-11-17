@@ -343,9 +343,9 @@ def _cell_html(tab, r, col, colors):
     if col["pos"] == store.STATUS:
         dot = f'<span style="color:{colors.get(v, charts.PENDING)}">●</span> ' if v else ""
         return dot + esc(v or "—")
-    link = r["links"][col["pos"]] if isinstance(col["pos"], int) else ""
-    if link:
-        return f'<a href="{esc(link, quote=True)}" style="color:{LINK}">{esc(v or "Open")}</a>'
+    links = store.cell_links(r, col["pos"])
+    if links:
+        return store.links_html(v or "Open", links, LINK, esc)
     return esc(v or "—")
 
 
@@ -417,8 +417,8 @@ class _Bugs:
         return store.parse_date(self.val(r, c))
 
     def link(self, r):
-        key, link = r["values"][self.key_col["pos"]], r["links"][self.key_col["pos"]]
-        return f'<a href="{esc(link, quote=True)}" style="color:{LINK}">{esc(key)}</a>' if link else esc(key)
+        key = r["values"][self.key_col["pos"]]
+        return store.links_html(key, store.cell_links(r, self.key_col["pos"]), LINK, esc)
 
     def filters(self, which):
         """What clicking a tile opens."""
@@ -780,6 +780,7 @@ def _fmt(v):
 
 def _query_table(cols, rows, ctx, limit, sql=""):
     """HTML for a result table. "<col> link" / "<x>_link" columns become links on their column."""
+    import sqldata
     vis = [i for i, c in enumerate(cols) if not c.startswith("_")]
     link_cols = {i for i in vis if cols[i].endswith(" link") or cols[i].endswith("_link")}
     link_of = {}
@@ -802,7 +803,10 @@ def _query_table(cols, rows, ctx, limit, sql=""):
         for i in show:
             text = esc(_fmt(r[i])) or f'<span style="color:{MUTED}">—</span>'
             href = r[link_of[i]] if i in link_of else (r[i] if i in link_cols else None)
-            if href and isinstance(href, str) and href.startswith("http"):
+            many = sqldata.MULTI_LINKS.get(href) if isinstance(href, str) and i not in link_cols else None
+            if many and isinstance(r[i], str):
+                text = store.links_html(_fmt(r[i]), many, LINK, esc)
+            elif href and isinstance(href, str) and href.startswith("http"):
                 text = f'<a href="{esc(href, quote=True)}" style="color:{LINK}">{text if i not in link_cols else "Open"}</a>'
             cells.append(f'<td valign="top" style="padding:3px 10px 3px 0">{text}</td>')
         bg = ' bgcolor="#F7F7F5"' if k % 2 else ""

@@ -35,6 +35,10 @@ from datetime import date
 import charts
 import tracker_store as store
 
+# The SQL tables keep one link per cell (the first); a cell with several links is kept
+# here too, keyed by that first link, so result tables can link each piece.
+MULTI_LINKS = {}
+
 ALL_START, ALL_END = "0001-01-01", "9999-12-31"
 
 
@@ -90,6 +94,9 @@ class Database:
     @staticmethod
     def _cell(r, c, link):
         if link:
+            many = store.cell_links(r, c["pos"])
+            if len(many) > 1:                     # a cell with several links: remember them all
+                MULTI_LINKS[many[0][1]] = many
             return r["links"][c["pos"]] or None
         v = r["values"][c["pos"]]
         if c["kind"] == "date":

@@ -1,5 +1,8 @@
 # What's new
 
+## 2.4.7
+- **Cells with several links** (e.g. “PROD-8687 PROD-8688”, each linked in the sheet) now keep every link. Each key is underlined on its own; double-click one to open it, or right-click / Open link to pick from all of them. On the dashboard (including SQL table cards) each key is its own link; the export links each key too.
+
 ## 2.4.6
 - **Hide Change Log and Feature Testing too** (right-click → Hide). Only the Dashboard always stays.
 - **Name your export files.** A File name field in Export (saved with each profile), with fill-ins {sheet}, {date} and {profile} — e.g. “EOD {date}” → EOD 2026-11-17.png / .pdf. Empty keeps the default “{sheet} snapshot {date}”.
