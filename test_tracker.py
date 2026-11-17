@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.7"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.8"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -758,6 +758,8 @@ class AddChartDialog(QDialog):
     """Add or change a chart: the Simple form writes the SQL for you, or write your own.
     The preview runs the query live, in the dashboard's dates."""
 
+    SHOW = chartquery.SHOW
+
     DATE_CHOICES = {"bugs": [("created", "Created in the dashboard dates"),
                              ("done", "Done in the dashboard dates"), ("ignore", "All dates")],
                     None: [("follow", "Follow the dashboard dates"), ("ignore", "All dates")]}
@@ -888,7 +890,7 @@ class AddChartDialog(QDialog):
         self.show_btns = {}
         show_row = QHBoxLayout()
         show_row.setSpacing(4)
-        for key, label in chartquery.SHOW:
+        for key, label in self.SHOW:
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setStyleSheet("QPushButton:checked { background:#E1F5EE; border-color:#1D9E75; color:#0F6E56; }")
@@ -1232,6 +1234,118 @@ class AddChartDialog(QDialog):
             lbl.setWordWrap(True)
             h.addWidget(lbl, 1)
         h.addStretch(0 if any(p.wide for p in parts) else 1)
+        self.pv_chart.setWidget(box)
+
+
+def tile_default_spec(tab):
+    """What a tile's Simple form starts with: % done, like the built-in tile."""
+    done = [["status_class", "is", "done"]]
+    if store.is_run_tab(tab):
+        return {"source": "runs", "trackers": [blocks.short_name(tab["title"])], "show": "stat_pct",
+                "dates": "follow", "filters": done}
+    if store.is_bug_tab(tab):
+        return {"source": "bugs", "show": "stat_pct", "dates": "ignore", "filters": done}
+    return {"source": "tab:" + tab["title"], "show": "stat", "dates": "follow", "filters": []}
+
+
+class TileDialog(AddChartDialog):
+    """Change what a dashboard tile's big number shows: the same Simple form / SQL as charts.
+    "Percent of all" shows matching / all; "Number" a count. A hand-written query shows its
+    first row: n, total → a percent; one value → as is; a second value → the small text."""
+
+    SHOW = chartquery.STAT_SHOW
+
+    def __init__(self, win, tab, tile=None):
+        tile = tile or {}
+        spec = tile.get("simple")
+        if not tile.get("sql"):
+            spec = tile_default_spec(tab)
+        block = {"id": "tile", "type": "sql", "sql": tile.get("sql", ""), "simple": spec,
+                 "show": tile.get("show") or (spec or {}).get("show", "stat_pct"),
+                 "title": tile.get("label", "")}
+        self.reset_tile = False
+        super().__init__(win, tab, block)
+        self.setWindowTitle(f"Edit tile — {tab['title']}")
+        self.on_dash.hide()
+        self.on_export.hide()
+        for lay_ in self.findChildren(QFormLayout):
+            lbl = lay_.labelForField(self.title)
+            if lbl:
+                lbl.setText("Label")
+        self.title.setToolTip("The small text under the number, e.g. “done” → “14 of 91 done”")
+        box = self.findChildren(QDialogButtonBox)[-1]
+        for b in box.buttons():
+            if box.buttonRole(b) == QDialogButtonBox.AcceptRole:
+                b.setText("Save tile")
+        default = box.addButton("Use the built-in tile", QDialogButtonBox.ResetRole)
+        default.setToolTip("Go back to the tile's own % done")
+        default.clicked.connect(self._use_default)
+        self.resize(1000, 640)
+
+    def _use_default(self):
+        self.reset_tile = True
+        self.accept()
+
+    def _fill_columns(self):
+        super()._fill_columns()
+        table = chartquery.table_for({"source": self.src.currentData(), "dates": "ignore"})
+        try:
+            if "status_class" in self.db.columns_of(table) and "status_class" not in self._columns:
+                self._columns = self._columns + ["status_class"]     # done / active / blocked…
+        except Exception:
+            pass
+
+    def _visible_fields(self):
+        super()._visible_fields()
+        split = self.show_as == "stat_split"
+        for w in (self.group, self.blanks_w):     # Breakdown: group by a column, like a pie
+            w.setVisible(split)
+            lbl = self.form.labelForField(w)
+            if lbl:
+                lbl.setVisible(split)
+
+    def _default_label(self):
+        if self.hand_written or self.show_as == "stat_split":
+            return ""
+        return chartquery.unit_for(self.spec())
+
+    def _changed(self, *_):
+        super()._changed()
+        if not self._loading:
+            self.title.setPlaceholderText(self._default_label() or "Label (optional)")
+
+    def result_tile(self):
+        if self.reset_tile:
+            return None
+        return {"sql": self.sql.toPlainText(), "show": self.show_as,
+                "simple": None if self.hand_written else self.spec(),
+                "label": self.title.text().strip() or self._default_label()}
+
+    def _preview(self):
+        t = self.result_tile() or {}
+        try:
+            stat = self.win.dashboard.tile_stat(t)
+            cols, rows, ms = self.db.query(t.get("sql") or "")
+        except Exception as exc:
+            self.pv_status.setText(f"✗ {exc}")
+            self.pv_status.setStyleSheet(f"color:{RED}; font-size:11px;")
+            self.pv_chart.setWidget(_small_label("Fix the query to see the tile.", MUTED))
+            return
+        self.pv_status.setText(f"✓ {len(rows)} row{'s' if len(rows) != 1 else ''} · {ms:.0f} ms")
+        self.pv_status.setStyleSheet(f"color:{GREEN}; font-size:11px;")
+        self.pv_table.clear()
+        vis = [i for i, c in enumerate(cols) if not c.startswith("_")]
+        self.pv_table.setColumnCount(len(vis))
+        self.pv_table.setHorizontalHeaderLabels([cols[i] for i in vis])
+        self.pv_table.setRowCount(min(len(rows), 20))
+        for r, row in enumerate(rows[:20]):
+            for k, i in enumerate(vis):
+                self.pv_table.setItem(r, k, QTableWidgetItem("" if row[i] is None else str(row[i])))
+        box = QWidget()
+        h = QVBoxLayout(box)
+        tile = self.win.dashboard._tile(self.tab, stat=stat)
+        h.addWidget(tile, 0, Qt.AlignTop)
+        h.addStretch(1)
         self.pv_chart.setWidget(box)
 
 
@@ -4058,12 +4172,9 @@ class FeatureTestingPage(QWidget):
         self.search.setMinimumWidth(300)
         self.search.textChanged.connect(self.refresh)
         top.addWidget(self.search)
-        self.sync_btn = QPushButton("↻ Sync from JIRA")
-        self.sync_btn.clicked.connect(lambda: self.win.sync_testing(force=True))
         self.jql_btn = QPushButton("JQL…")
         self.jql_btn.setObjectName("link")
         self.jql_btn.clicked.connect(self.win.edit_testing_jql)
-        top.addWidget(self.sync_btn)
         top.addWidget(self.jql_btn)
         root.addLayout(top)
         self.date_slot = QVBoxLayout()               # the dashboard's Dates bar sits here on this tab
@@ -4203,7 +4314,6 @@ class FeatureTestingPage(QWidget):
         data = self.win.data or {}
         testing = data.get("testing")
         admin = changelog.has_credentials()
-        self.sync_btn.setVisible(admin)
         self.jql_btn.setVisible(admin)
         body = QWidget()
         body.setObjectName("dash")
@@ -4212,7 +4322,7 @@ class FeatureTestingPage(QWidget):
         root.setSpacing(14)
         if not testing or not testing.get("tickets"):
             self.info.setText("")
-            root.addWidget(_small_label("Click ↻ Sync from JIRA to read the Testing tickets." if admin else
+            root.addWidget(_small_label("Click ↻ Sync (top right) to read the Testing tickets from JIRA." if admin else
                                         "Nothing synced from JIRA yet. The admin's app syncs the Testing "
                                         "tickets here for everyone.", MUTED))
             root.addStretch(1)
@@ -4502,10 +4612,17 @@ class Dashboard(QScrollArea):
         tiles = QGridLayout()
         tiles.setSpacing(10)
         tabs = [t for t in data["tabs"] if _visible_rows(t) or t["rows"]]
-        for i, tab in enumerate(tabs):
+        conf = self.win.tile_settings()
+        shown = [t for t in tabs if not (conf.get(t["title"]) or {}).get("hidden")]
+        for i, tab in enumerate(shown):
             tiles.addWidget(self._tile(tab), i // 4, i % 4)
-        for c in range(min(4, len(tabs))):
+        for c in range(min(4, len(shown))):
             tiles.setColumnStretch(c, 1)
+        tiles_btn = QPushButton("Tiles ▾")
+        tiles_btn.setObjectName("link")
+        tiles_btn.setToolTip("Choose which tiles show (on this computer)")
+        tiles_btn.clicked.connect(lambda: self._tiles_menu(tabs, tiles_btn))
+        head.addWidget(tiles_btn, 0, Qt.AlignBottom)
         root.addLayout(tiles)
 
         for tab in tabs:
@@ -4612,20 +4729,77 @@ class Dashboard(QScrollArea):
         if self.win.data:
             self.set_data(self.win.data, animate=True)
 
-    def _tile(self, tab):
+    # ── tiles ─────────────────────────────────────────────────────────────────
+
+    def tile_stat(self, conf):
+        """(big, small) for a tile's own query, in the dashboard's dates."""
+        ctx = blocks.Ctx(self.range, self.range_text, export=False, settings=_settings(self.win),
+                         data=self.win.data)
+        _, cols, rows, _ = blocks.run_query({"sql": conf.get("sql") or ""}, ctx)
+        big, small, slices = chartquery.tile_stat(cols, rows, conf.get("label", ""))
+        if slices:                                # a breakdown: its slices are the bar, in the chart colors
+            key = chartquery.color_column(conf.get("sql"), conf.get("simple"))
+            colors = blocks._query_colors({"color_by": key}, key, [v for v, _ in slices])
+            slices = [(v, n, colors.get(v, charts.PENDING)) for v, n in slices]
+        return big, small, slices
+
+    def _tiles_menu(self, tabs, btn):
+        conf = self.win.tile_settings()
+        menu = QMenu(self)
+        for t in tabs:
+            a = menu.addAction(t["title"])
+            a.setCheckable(True)
+            a.setChecked(not (conf.get(t["title"]) or {}).get("hidden"))
+            a.toggled.connect(lambda on, title=t["title"]: self.win.set_tile(title, hidden=not on))
+        menu.addSeparator()
+        menu.addAction("Show all", lambda: [self.win.set_tile(t["title"], hidden=False) for t in tabs])
+        menu.exec_(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _tile_menu(self, tile, tab):
+        conf = self.win.tile_settings().get(tab["title"]) or {}
+        menu = QMenu(self)
+        menu.addAction("Edit tile…", lambda: self.win.edit_tile(tab))
+        if conf.get("sql"):
+            menu.addAction("Use the built-in tile", lambda: self.win.set_tile(tab["title"], stat=None))
+        menu.addAction("Hide tile", lambda: self.win.set_tile(tab["title"], hidden=True))
+        menu.addSeparator()
+        menu.addAction(f"Open {tab['title']}", lambda: self._go(tab["title"]))
+        menu.exec_(QCursor.pos())
+
+    def _tile(self, tab, stat=None):
         rows = self._rows(tab)
         status, colors = _colors_for(tab, rows)
         tile = QFrame()
         tile.setObjectName("tile")
         tile.setCursor(Qt.PointingHandCursor)
-        tile.setToolTip(f"Open {tab['title']}")
-        tile.mousePressEvent = lambda e, t=tab["title"]: self._go(t)
+        tile.setToolTip(f"Open {tab['title']} · right-click to change or hide this tile")
+        tile.mousePressEvent = (lambda e, t=tab["title"]: self._go(t) if e.button() == Qt.LeftButton else None)
+        if stat is None:
+            tile.setContextMenuPolicy(Qt.CustomContextMenu)
+            tile.customContextMenuRequested.connect(lambda _, t=tile: self._tile_menu(t, tab))
+            conf = self.win.tile_settings().get(tab["title"]) or {}
+            if conf.get("sql"):
+                try:
+                    stat = self.tile_stat(conf)
+                except Exception as exc:
+                    stat = ("—", f"query error: {exc}"[:80], None)
         lay = QVBoxLayout(tile)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(4)
         lay.addWidget(_small_label(tab["title"], "#666663", 11))
         mini = charts.MiniBar()
         if status and rows:
+            counts = Counter(store.row_status(tab, r) for r in rows)
+            order = charts.status_order(list(counts), status["options"])
+            mini.set_data([(v or "No status", counts[v], colors.get(v, charts.PENDING)) for v in order])
+        if stat is not None and stat[2]:           # a breakdown: the bar shows its slices
+            mini.set_data(stat[2])
+        if stat is not None:                       # this tile's own number
+            big = QLabel(stat[0])
+            big.setStyleSheet("font-size:24px; font-weight:bold;")
+            sub = _small_label(stat[1] + (f" · {self.range_text}" if self._dated(tab) and stat[1] else ""),
+                               "#52514E", 11)
+        elif status and rows:
             counts = Counter(store.row_status(tab, r) for r in rows)
             cls = Counter()
             for v, n in counts.items():
@@ -4641,8 +4815,6 @@ class Dashboard(QScrollArea):
             if self._dated(tab):
                 bits.append(self.range_text)
             sub = _small_label(" · ".join(bits), "#52514E", 11)
-            order = charts.status_order(list(counts), status["options"])
-            mini.set_data([(v or "No status", counts[v], colors.get(v, charts.PENDING)) for v in order])
         else:
             big = QLabel(str(len(rows)))
             big.setStyleSheet("font-size:24px; font-weight:bold;")
@@ -4950,7 +5122,8 @@ class TrackerApp(QMainWindow):
         self.open_btn = QPushButton("Open in Google Sheets ↗")
         self.open_btn.clicked.connect(self._open_sheet)
         self.sync_btn = QPushButton("↻ Sync")
-        self.sync_btn.setToolTip("Pull the latest data from the Google Sheet (⌘R)")
+        self.sync_btn.setToolTip("Pull the latest data from the Google Sheet, and the Testing tickets "
+                                 "from JIRA if you have a JIRA token (⌘R)")
         self.sync_btn.clicked.connect(lambda: self._sync(quiet=False))
         settings_btn = QPushButton("⚙ Settings")
         settings_btn.clicked.connect(lambda: self._open_settings())
@@ -5170,6 +5343,36 @@ class TrackerApp(QMainWindow):
 
     # ── hidden tabs (this computer only; the sheet is unchanged) ──────────────
 
+    # ── dashboard tiles (this computer only) ──────────────────────────────────
+
+    def tile_settings(self):
+        """{tab title: {"hidden": bool, "sql", "show", "simple", "label"}} for this sheet."""
+        return self.cfg.setdefault("tiles", {}).setdefault(self.url or "", {})
+
+    def set_tile(self, title, hidden=None, stat=False):
+        """Hide/show a tile, and/or set its stat (a dict from TileDialog; None = built-in)."""
+        conf = self.tile_settings()
+        t = dict(conf.get(title) or {})
+        if hidden is not None:
+            t["hidden"] = hidden
+        if stat is not False:
+            for k in ("sql", "show", "simple", "label"):
+                t.pop(k, None)
+            t.update(stat or {})
+        t = {k: v for k, v in t.items() if v not in (None, False, "")}
+        if t:
+            conf[title] = t
+        else:
+            conf.pop(title, None)
+        store.save_config(self.cfg)
+        if self.data:
+            self.dashboard.set_data(self.data)
+
+    def edit_tile(self, tab):
+        dlg = TileDialog(self, tab, self.tile_settings().get(tab["title"]))
+        if dlg.exec_() == QDialog.Accepted:
+            self.set_tile(tab["title"], stat=dlg.result_tile())
+
     def hidden_tabs(self):
         return self.cfg.setdefault("hidden_tabs", {}).setdefault(self.url or "", [])
 
@@ -5337,8 +5540,12 @@ class TrackerApp(QMainWindow):
         if quiet and (self._tasks or self._busy_editing()):
             return            # something is running, or someone is mid-edit; skip this tick
         src = self.source
-        self._run(src.fetch,
-                  lambda d: self._on_fetched(d, None if quiet else "Synced."),
+
+        def fetched(d):
+            self._on_fetched(d, None if quiet else "Synced.")
+            if not quiet:
+                self.sync_testing(now=True)          # the Sync button refreshes JIRA too
+        self._run(src.fetch, fetched,
                   on_error=(lambda e: self._set_conn("offline", store.describe_error(e))) if quiet
                            else (lambda e: self._on_error(e, note="")),
                   busy_msg=None if quiet else "Syncing…")
@@ -6032,7 +6239,7 @@ class TrackerApp(QMainWindow):
 
     # ── feature testing from JIRA ─────────────────────────────────────────────
 
-    def sync_testing(self, force=False):
+    def sync_testing(self, force=False, now=False):
         """Read the Testing tickets from JIRA and save them to the sheet's hidden tab, so
         everyone sees them. Only the app with the JIRA token does this, at most every few
         minutes (or now, with force)."""
@@ -6044,7 +6251,7 @@ class TrackerApp(QMainWindow):
             return
         if getattr(self, "_testing_busy", False):
             return
-        if not force and time.time() - getattr(self, "_testing_at", 0) < feature_testing.SYNC_MINUTES * 60:
+        if not (force or now) and time.time() - getattr(self, "_testing_at", 0) < feature_testing.SYNC_MINUTES * 60:
             return
         self._testing_busy, self._testing_at = True, time.time()
         self._set_jira("syncing")
@@ -6061,8 +6268,9 @@ class TrackerApp(QMainWindow):
             store.save_cache(self.url, self.data)
             self.testing_page.refresh()
             self._set_jira("ok")
-            if force:
-                self._set_status(f"Synced {len(snap['tickets'])} Testing tickets from JIRA.")
+            if force or now:
+                self._set_status(f"Synced the sheet and {len(snap['tickets'])} Testing tickets from JIRA."
+                                 if now else f"Synced {len(snap['tickets'])} Testing tickets from JIRA.")
 
         def failed(exc):
             self._testing_busy = False

@@ -1,5 +1,11 @@
 # What's new
 
+## 2.4.8
+- **Choose the dashboard's top tiles.** Tiles ▾ (next to “Data as of…”) ticks which tiles show; right-click a tile → Hide tile. Only on your computer.
+- **Change a tile's number.** Right-click a tile → Edit tile…: the same Simple form / SQL as charts. Show it as a percent of all (e.g. % failed, % done) or a number, with your own label. The status bar under it stays. “Use the built-in tile” goes back to % done.
+- **Breakdown tiles.** Show as Breakdown (or a pasted pie query: label, n) → the total, each value's count (“24 N/A · 8 PASS · 2 FAIL”), and the bar split into those values in the chart's colors.
+- **↻ Sync also syncs JIRA** (the Testing tickets for Feature Testing), if you have a JIRA token. The separate “Sync from JIRA” button is gone.
+
 ## 2.4.7
 - **Cells with several links** (e.g. “PROD-8687 PROD-8688”, each linked in the sheet) now keep every link. Each key is underlined on its own; double-click one to open it, or right-click / Open link to pick from all of them. On the dashboard (including SQL table cards) each key is its own link; the export links each key too.
 

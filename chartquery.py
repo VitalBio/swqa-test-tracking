@@ -20,6 +20,7 @@ import re
 import sqldata
 
 SHOW = [("pie", "Pie"), ("bars", "Bars"), ("table", "Table"), ("days", "Per day")]
+STAT_SHOW = [("stat_pct", "Percent of all"), ("stat", "Number"), ("stat_split", "Breakdown")]
 OPS = [("is", "is"), ("is not", "is not"), ("contains", "contains"),
        ("is empty", "is empty"), ("is not empty", "is not empty")]
 
@@ -83,13 +84,13 @@ def to_sql(spec, db):
     q = sqldata.ident
     table = table_for(spec)
     src = spec.get("source", "runs")
-    where = []
+    where, cond = [], []          # cond: what a "percent of all" stat counts (where: the "all")
     if src in ("runs", "issues", "resolutions"):
         trackers = spec.get("trackers") or []
         if trackers:
             where.append(f"tracker IN ({', '.join(lit(t) for t in trackers)})")
     if src in ("runs", "issues") and spec.get("only_failed"):
-        where.append("failed = 1")
+        cond.append("failed = 1")
     if src == "bugs" and spec.get("product") in ("VitalOne", "Viking"):
         where.append(f"product = {lit(spec['product'])}")
     # dates: issues and resolutions follow the dashboard's dates by their table; runs by
@@ -106,16 +107,25 @@ def to_sql(spec, db):
             continue
         c = q(col)
         if op == "is":
-            where.append(f"{c} = {lit(val)}")
+            cond.append(f"{c} = {lit(val)}")
         elif op == "is not":
-            where.append(f"({c} IS NULL OR {c} != {lit(val)})")
+            cond.append(f"({c} IS NULL OR {c} != {lit(val)})")
         elif op == "contains":
-            where.append(f"{c} LIKE {lit('%' + str(val) + '%')}")
+            cond.append(f"{c} LIKE {lit('%' + str(val) + '%')}")
         elif op == "is empty":
-            where.append(f"({c} IS NULL OR {c} = '')")
+            cond.append(f"({c} IS NULL OR {c} = '')")
         elif op == "is not empty":
-            where.append(f"({c} IS NOT NULL AND {c} != '')")
+            cond.append(f"({c} IS NOT NULL AND {c} != '')")
     show = spec.get("show", "pie")
+    if show == "stat_pct":          # a tile: how many match, out of all
+        match = " AND ".join(cond) or "1"
+        sql = (f"SELECT SUM(CASE WHEN {match} THEN 1 ELSE 0 END) AS n,\n       COUNT(*) AS total\n"
+               f"FROM {q(table)}")
+        return sql + ("\nWHERE " + "\n  AND ".join(where) if where else "")
+    where += cond
+    if show == "stat":              # a tile: one number
+        sql = f"SELECT COUNT(*) AS n\nFROM {q(table)}"
+        return sql + ("\nWHERE " + "\n  AND ".join(where) if where else "")
     rows_ref = "GROUP_CONCAT(_tab || ':' || _row) AS _rows"
 
     if show == "table":
@@ -226,3 +236,47 @@ def shape(cols, rows, show="auto"):
     if show == "auto":
         return ("pie" if series is None and len(rows) <= 8 else "bars"), label, series, value
     return "bars", label, series, value
+
+
+# ── dashboard tiles ───────────────────────────────────────────────────────────
+
+def _num(v):
+    return f"{v:.1f}".rstrip("0").rstrip(".") if isinstance(v, float) else str(v)
+
+def tile_stat(cols, rows, label=""):
+    """(big text, small text, slices) for a tile from a query's result:
+    label, n (one row per value, like a pie) → total / "24 N/A · 8 PASS" / [(value, n)…], drawn as the bar;
+    n, total → "15%" / "14 of 91 <label>";  n → "14" / label;  anything else as written."""
+    vis = [i for i, c in enumerate(cols) if not c.startswith("_")]
+    if not rows:
+        return "0", label, None
+    first = [rows[0][i] for i in vis]
+    if len(first) >= 2 and not is_number(first[0]) and is_number(first[-1]) and (
+            len(rows) > 1 or "label" in [cols[i].lower() for i in vis]):
+        slices = [(str(r[vis[0]]) if r[vis[0]] not in (None, "") else "(blank)", r[vis[-1]] or 0) for r in rows]
+        slices = [x for x in slices if x[1]]
+        total = sum(n for _, n in slices)
+        parts = " · ".join(f"{_num(n)} {v}" for v, n in slices[:4]) + (" · …" if len(slices) > 4 else "")
+        return _num(total), (f"{label} · " if label else "") + parts, slices
+    if len(first) >= 2 and is_number(first[0]) and is_number(first[1]):
+        n, total = first[0] or 0, first[1] or 0
+        pct = round(100 * n / total) if total else 0
+        return f"{pct}%", f"{_num(n)} of {_num(total)}" + (f" {label}" if label else ""), None
+    if not first:
+        return "—", label, None
+    big = "—" if first[0] is None else _num(first[0])
+    small = label if len(first) < 2 or first[1] is None else str(first[1])
+    return big, small, None
+
+
+def color_column(sql, simple=None):
+    """Which column a tile's breakdown is by (for its colors): the Simple form's group, or
+    the column a hand-written query names as `label`."""
+    if simple and simple.get("group"):
+        return simple["group"]
+    m = re.search(r'\bSELECT\s+(.*?)\bAS\s+label\b', sql or "", re.I | re.S)
+    q = re.search(r'"([^"]+)"', m.group(1)) if m else None
+    if q:
+        return q.group(1)
+    bare = re.fullmatch(r'\s*([A-Za-z_]\w*)\s*', m.group(1)) if m else None
+    return bare.group(1) if bare else "label"
