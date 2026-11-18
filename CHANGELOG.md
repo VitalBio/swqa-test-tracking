@@ -1,5 +1,8 @@
 # What's new
 
+## 2.4.10
+- **Hardware support requests In Testing or Monitored no longer count as open.** They've been looked at and fixed, so the instrument isn't shown as HARDWARE SUPPORT REQUESTED (in the app and the export). Open means In Progress, Triage, Diagnosing…
+
 ## 2.4.9
 - **Hide dashboard cards.** Each card has a Hide link; Show ▾ (top of the dashboard, was Tiles ▾) ticks which tiles and cards show. Only on your computer.
 - **Bug Statuses: All / VitalOne / Viking / Split.** A switch on the card: all bugs together, one product, or each in its own section (as before). Remembered on your computer.

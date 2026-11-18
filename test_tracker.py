@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.9"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.10"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -4381,7 +4381,7 @@ class FeatureTestingPage(QWidget):
                      if k not in new_bugs]
         admin_bugs = changelog.has_credentials()
         hw = list(dict.fromkeys(k for _, s in shown for k in s.get("support", [])))
-        hw_open = [k for k in hw if (info.get(k) or {}).get("status_category") != "done"]
+        hw_open = [k for k in hw if not feature_testing.support_resolved(info.get(k))]
 
         # Overview
         card, v = self._card("Overview", rtext)
@@ -4450,7 +4450,7 @@ class FeatureTestingPage(QWidget):
                        if b_.get("status") else "") + flip, 12))
             for k in s.get("support", []):
                 t_ = info.get(k) or {}
-                done_ = t_.get("status_category") == "done"
+                done_ = feature_testing.support_resolved(t_)
                 bl.addWidget(self._rich(
                     f'{self._pill("Hardware Support Request", "#FFF6E5", "#854F0B")}&nbsp; {self._jira(k)}'
                     + (f' {html.escape(t_["summary"])}' if t_.get("summary") else "")

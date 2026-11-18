@@ -837,7 +837,7 @@ class Painter(es.Renderer):
                      if b not in new_bugs]
         info = testing.get("support") or {}
         hw = list(dict.fromkeys(x for _, s in shown for x in s.get("support", [])))
-        hw_open = [x for x in hw if (info.get(x) or {}).get("status_category") != "done"]
+        hw_open = [x for x in hw if not ft.support_resolved(info.get(x))]
         body = []
         if self.opt("testing", "overview"):
             body.append(k.tiles([("Sessions", len(shown), ctx.range_text, "ink"),
@@ -927,7 +927,7 @@ class Painter(es.Renderer):
                 rows.append(dict(link_html=self.link(x, f"{changelog.JIRA_SITE}/browse/{x}"), tag=e0["product"],
                                  text=t_.get("summary") or e0["name"],
                                  note=f"{e0['name']} · S{s0['n']}", right=t_.get("status") or "",
-                                 right_color="good" if t_.get("status_category") == "done" else "warn"))
+                                 right_color="good" if ft.support_resolved(t_) else "warn"))
             body.append(vstack([k.label("Hardware Support Requests", width), k.table(rows, width)], 6))
         if not body:
             return None

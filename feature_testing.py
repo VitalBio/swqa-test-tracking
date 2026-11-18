@@ -393,6 +393,17 @@ def _inst_label(spellings):
         return f"{head.upper()}-{num}"
     return best.strip()
 
+# A hardware support request in one of these states has been looked at and (usually) fixed:
+# it's being tested or watched, so it doesn't make the instrument "support requested".
+# Open ones are In Progress, Triage, Diagnosing…
+SUPPORT_RESOLVED = {"in testing", "monitored", "monitoring"}
+
+def support_resolved(t):
+    """Is this hardware support request (from testing["support"]) no longer open?"""
+    t = t or {}
+    return t.get("status_category") == "done" or (t.get("status") or "").strip().lower() in SUPPORT_RESOLVED
+
+
 def instruments(testing, rng, keep=lambda e: True):
     """The state of each instrument (a session's Test System): open Hardware Support Requests
     on it (any date — they're open now), and its last session. Lists instruments with an open
@@ -426,7 +437,7 @@ def instruments(testing, rng, keep=lambda e: True):
     open_by, logged_by = {}, {}
     for x, (k, e, s) in requests.items():
         t = info.get(x) or {}
-        done = t.get("status_category") == "done"
+        done = support_resolved(t)
         if done and x not in in_rng:
             continue
         head = (t.get("summary") or "").split(" - ")[0].strip()
