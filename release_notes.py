@@ -8,6 +8,7 @@ previous stable release, so it includes any testing builds in between.
 
     python release_notes.py body v2.4.10        # the full release body (notes + install), to stdout
     python release_notes.py backfill [--dry-run]  # add notes to releases that don't have any
+    python release_notes.py slack v2.4.10 release-notes.md   # post them to Slack ($SLACK_WEBHOOK_URL)
 
 Runs in GitHub Actions with GITHUB_TOKEN and GITHUB_REPOSITORY (see .github/workflows).
 """
@@ -128,10 +129,47 @@ def backfill(dry_run=False):
             print(f"{tag}: notes added")
 
 
+# ── Slack ─────────────────────────────────────────────────────────────────────
+
+def slack_text(tag, md):
+    """A release body (markdown) as a Slack message: the "What's new" part, in Slack's mrkdwn."""
+    md = md.split("\n---\n")[0].strip()
+    lines = []
+    for line in md.splitlines():
+        if line.startswith(MARK):
+            continue                                          # the message has its own title
+        line = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"<\2|\1>", line)   # links
+        line = re.sub(r"\*\*(.+?)\*\*", r"*\1*", line)          # bold
+        line = re.sub(r"`([^`]+)`", r"`\1`", line)
+        line = re.sub(r"^#{1,6}\s*(.+)$", r"*\1*", line)         # headings → bold
+        line = re.sub(r"^(\s*)[-*] ", lambda m: m.group(1) + "• ", line)
+        lines.append(line)
+    url = f"https://github.com/{REPO}/releases/tag/{tag}"
+    body = "\n".join(lines).strip()
+    if len(body) > 3500:                                      # Slack truncates long messages
+        body = body[:3500].rsplit("\n", 1)[0] + "\n…"
+    return (f":rocket: *Test Tracker {tag} is out*\n\n{body}\n\n"
+            f"<{url}|Release page> · update from the app with *⬆ Update*")
+
+def slack(tag, path):
+    hook = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
+    with open(path, encoding="utf-8") as f:
+        text = slack_text(tag, f.read())
+    if not hook:
+        print("SLACK_WEBHOOK_URL isn't set; would have posted:\n\n" + text)
+        return
+    req = urllib.request.Request(hook, data=json.dumps({"text": text}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        print("Slack:", r.status, r.read().decode()[:100])
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "body" and len(sys.argv) > 2:
         sys.stdout.write(body(sys.argv[2], "--prerelease" in sys.argv))
+    elif cmd == "slack" and len(sys.argv) > 3:
+        slack(sys.argv[2], sys.argv[3])
     elif cmd == "backfill":
         backfill("--dry-run" in sys.argv)
     else:
