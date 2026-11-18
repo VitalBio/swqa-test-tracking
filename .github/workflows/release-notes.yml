@@ -1,0 +1,28 @@
+# Adds "What's new" (from CHANGELOG.md) to any GitHub Release that has no notes yet.
+# Runs when the changelog or this script changes on main, or by hand (Actions → Run workflow).
+# Releases that already have notes are left alone.
+name: Release notes
+
+on:
+  push:
+    branches: [main]
+    paths: ["CHANGELOG.md", "release_notes.py", ".github/workflows/release-notes.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0             # tags and history, for versions older than the changelog
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Add notes to releases without them
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python release_notes.py backfill
