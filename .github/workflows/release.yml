@@ -64,11 +64,3 @@ jobs:
           prerelease: ${{ steps.channel.outputs.testing == 'true' }}
           make_latest: ${{ steps.channel.outputs.testing != 'true' }}
           body_path: release-notes.md   # the install steps live in .github/release_install.md
-
-      - name: Announce in Slack (stable releases; needs the SLACK_WEBHOOK_URL repo secret)
-        if: startsWith(github.ref, 'refs/tags/') && steps.channel.outputs.testing != 'true'
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          if [ -z "$SLACK_WEBHOOK_URL" ]; then echo "No SLACK_WEBHOOK_URL secret; skipping."; exit 0; fi
-          python release_notes.py slack "$GITHUB_REF_NAME" release-notes.md
