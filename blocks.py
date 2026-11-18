@@ -837,7 +837,7 @@ def _sql(b, tabs, ctx):
     refs = cols.index("_rows") if "_rows" in cols else None
     ref_list = lambda r: [x for x in (r[refs] or "").split(",") if x] if refs is not None else []
 
-    if kind == "table":
+    if kind == "table" and (rows or (b.get("show") or "auto") != "pie"):
         has_rows = "_tab" in cols and "_row" in cols
         pick = None
         if has_rows:
@@ -846,6 +846,12 @@ def _sql(b, tabs, ctx):
             pick = lambda _, db=db, refs=all_refs: _refs_pick(db)(refs)
         return [Part(title, _query_table(cols, rows, ctx, None if ctx.export else 25, b.get("sql") or ""), pick,
                      wide=True, full=True)]
+    if not rows and (b.get("show") or "auto") == "pie":      # keep its place in the row of pies
+        pie = charts.DonutChart()
+        when = f" in\n{ctx.range_text}" if ctx.rng and (":start" in (b.get("sql") or "") or
+                                                       ":end" in (b.get("sql") or "")) else ""
+        pie.set_data([], ("0", unit), f"No rows{when}.")
+        return [Part(title, pie)]
     if not rows:
         return None
 

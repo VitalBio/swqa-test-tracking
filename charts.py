@@ -260,13 +260,15 @@ class DonutChart(_Chart):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.slices, self.center = [], ("", "")
+        self.slices, self.center, self.note = [], ("", ""), ""
         self.setMinimumHeight(170)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
-    def set_data(self, slices, center=("", "")):
+    def set_data(self, slices, center=("", ""), note=""):
+        """note: shown beside an empty ring when there's nothing to count, so the chart keeps
+        its place (and its size) in a row of pies."""
         self.slices = sorted((s for s in slices if s[1] > 0), key=lambda s: -s[1])   # most first
-        self.center = center
+        self.center, self.note = center, note
         self.setFixedHeight(max(170, 24 * len(self.slices) + 30))
         fm, bold = QFontMetrics(_font(12)), QFontMetrics(_font(12, bold=True))
         label_w = max((bold.horizontalAdvance(l or "No status") for l, _, _ in self.slices), default=80)
@@ -283,12 +285,15 @@ class DonutChart(_Chart):
         p.setRenderHint(QPainter.Antialiasing)
         self._marks = []
         total = sum(n for _, n, _ in self.slices)
-        if not total:
-            self._empty(p)
-            return
         d = min(self.height() - 20, 150)
         ring = QRectF(10, (self.height() - d) / 2, d, d)
         hole = d * 0.62
+        if not total and self.note:
+            self._empty_ring(p, ring, hole)
+            return
+        if not total:
+            self._empty(p)
+            return
         start = 90.0
         # a slice and its legend row highlight together
         hv = self._hover % len(self.slices) if self._hover is not None else None
@@ -349,6 +354,31 @@ class DonutChart(_Chart):
             p.drawText(QRectF(x0, y, row.width() - 8, 24), Qt.AlignVCenter | Qt.AlignRight, count)
             self._marks.append((row, f"<b>{label or 'No status'}</b><br>{n} of {total} — click to see them", label))
             y += 24
+
+
+def _donut_empty_ring(self, p, ring, hole):
+    """An empty, grey ring with the center text and the note to its right."""
+    c = QColor(PENDING)
+    c.setAlpha(70)
+    path = QPainterPath()
+    path.addEllipse(ring)
+    path.addEllipse(QRectF(ring.center().x() - hole / 2, ring.center().y() - hole / 2, hole, hole))
+    p.setPen(Qt.NoPen)
+    p.setBrush(c)
+    p.drawPath(path)
+    big, small = self.center
+    mid = ring.center()
+    p.setPen(QColor(MUTED))
+    p.setFont(_font(22, bold=True))
+    p.drawText(QRectF(mid.x() - hole / 2, mid.y() - 20, hole, 26), Qt.AlignCenter, big)
+    p.setFont(_font(11))
+    p.drawText(QRectF(mid.x() - hole / 2, mid.y() + 6, hole, 16), Qt.AlignCenter, small)
+    p.setFont(_font(12))
+    x0 = ring.right() + 24
+    p.drawText(QRectF(x0, 0, self.width() - x0 - 8, self.height()),
+               Qt.AlignVCenter | Qt.AlignLeft | Qt.TextWordWrap, self.note)
+
+DonutChart._empty_ring = _donut_empty_ring
 
 
 class StackedBars(_Chart):

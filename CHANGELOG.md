@@ -1,5 +1,9 @@
 # What's new
 
+## 2.4.11
+- **Pie charts with nothing in the dates keep their place.** An empty pie shows as a grey "0 rows" ring in its row (on the dashboard and in exports) instead of a line of text that pushed the rest of the row down. A row of pies stays a row.
+- **Slack announcement on release.** Stable releases post their notes to a Slack channel once the repo's SLACK_WEBHOOK_URL secret is set.
+
 ## 2.4.10
 - **Hardware support requests In Testing or Monitored no longer count as open.** They've been looked at and fixed, so the instrument isn't shown as HARDWARE SUPPORT REQUESTED (in the app and the export). Open means In Progress, Triage, Diagnosing…
 

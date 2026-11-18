@@ -183,7 +183,7 @@ class Kit:
 
     # charts ──────────────────────────────────────────────────────────────────
 
-    def donut(self, slices, big, small, width, d=156):
+    def donut(self, slices, big, small, width, d=156, note=""):
         """A donut with a legend of label, count and % — beside it, or under it when the
         column is too narrow."""
         slices = sorted(((l or "No status", n, c) for l, n, c in slices if n > 0), key=lambda s: -s[1])  # most first
@@ -194,7 +194,7 @@ class Kit:
         count_w = max((cfm.horizontalAdvance(f"{n}  ·  {round(100 * n / total)}%") for _, n, _ in slices), default=40)
         label_w = max((fm.horizontalAdvance(l) for l, _, _ in slices), default=60)
         beside = width >= d + 28 + 22 + min(label_w, 260) + 24 + count_w
-        legend_h = row * len(slices)
+        legend_h = row * (len(slices) or (1 if note else 0))
         h = max(d, legend_h) if beside else d + 16 + legend_h
 
         def draw(p, x, y):
@@ -217,6 +217,16 @@ class Kit:
                     p.drawLine(QPointF(c0.x() + (d / 2 - ring) * math.cos(ang), c0.y() - (d / 2 - ring) * math.sin(ang)),
                                QPointF(c0.x() + d / 2 * math.cos(ang), c0.y() - d / 2 * math.sin(ang)))
                 start += span
+            if not slices:                                # nothing in the dates: an empty grey ring
+                p.setPen(QPen(self.c("muted"), ring))
+                p.setOpacity(0.25)
+                p.drawEllipse(rect.adjusted(ring / 2, ring / 2, -ring / 2, -ring / 2))
+                p.setOpacity(1.0)
+                p.setPen(self.c("muted"))
+                p.setFont(lf)
+                nx = x + d + 28 if beside else x
+                p.drawText(QRectF(nx, cy - row / 2 if beside else y + d + 16, width - (nx - x), row),
+                           Qt.AlignVCenter | Qt.AlignLeft, note)
             p.setPen(self.c("ink"))
             p.setFont(font(26, True))
             p.drawText(QRectF(rect.x(), cy - 24, d, 30), Qt.AlignCenter, big)
@@ -482,7 +492,7 @@ class Painter(es.Renderer):
         if isinstance(c, charts.DonutChart):
             big, small = c.center
             return "donut", lambda w: vstack(([k.label(label, w)] if label else [])
-                                             + [k.donut(c.slices, big, small, w)], 8)
+                                             + [k.donut(c.slices, big, small, w, note=c.note)], 8)
         if isinstance(c, (charts.StackedBars, charts.DayColumns)):
             rows = c.groups if isinstance(c, charts.StackedBars) else \
                 [(f"{d:%a %b %-d}", segs) for d, segs in reversed(c.days)][:14]
