@@ -59,7 +59,7 @@ def is_e2e(tab):
 def card_tabs(data):
     """Tabs whose cards start ticked: everything the built-in sections don't already
     cover (the end-to-end trackers and the bug tab have sections of their own)."""
-    return [t for t in (data or {}).get("tabs", []) if not is_e2e(t) and not store.is_bug_tab(t)]
+    return [t for t in (data or {}).get("tabs", []) if not is_e2e(t) and not store.is_bug_tab(t)] + [lay.custom_tab()]
 
 def card_sid(tab, card):
     return f"{CARD}{tab['title']}{SEP}{card['id']}"
@@ -67,8 +67,8 @@ def card_sid(tab, card):
 def dashboard_cards(data):
     """[(section id, tab, card)] for every card on the dashboard, in its order."""
     out = []
-    for t in (data or {}).get("tabs", []):
-        if not t.get("rows"):
+    for t in (data or {}).get("tabs", []) + [lay.custom_tab()]:      # custom cards come last, as on the dashboard
+        if not t.get("rows") and not lay.is_custom(t):
             continue
         try:
             cards = lay.layout_for(t, data.get("settings"))["cards"]
@@ -84,7 +84,8 @@ def find_card(data, sid):
     before every card could be exported) means that tab's first card."""
     rest = sid[len(CARD):]
     title, _, cid = rest.partition(SEP)
-    tab = next((t for t in (data or {}).get("tabs", []) if t["title"] == title), None)
+    tab = lay.custom_tab() if title == lay.CUSTOM else \
+        next((t for t in (data or {}).get("tabs", []) if t["title"] == title), None)
     if tab is None:
         return None, None
     cards = [c for c in lay.layout_for(tab, data.get("settings"))["cards"] if c.get("dash", True)]

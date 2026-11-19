@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.16"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.17"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -955,8 +955,12 @@ class ColumnsDialog(QDialog):
         return out
 
 
-def default_spec(tab):
+def default_spec(tab, data=None):
     """What the Add chart form starts with for a tab."""
+    if layout.is_custom(tab):                  # a custom card: start from the first sheet tab
+        real = next((t for t in (data or {}).get("tabs", []) if t["columns"]), None)
+        return default_spec(real) if real else {"source": "runs", "group": "status", "show": "pie",
+                                                 "dates": "follow"}
     short = blocks.short_name(tab["title"])
     if store.is_run_tab(tab):
         reason = next((c["name"].strip() for c in tab["columns"] if store.wants_pie(c)
@@ -1008,7 +1012,8 @@ class AddChartDialog(QDialog):
     def __init__(self, win, tab, block=None):
         super().__init__(win)
         self.win, self.tab = win, tab
-        self.setWindowTitle(("Edit chart" if block else "Add chart") + f" — {tab['title']}")
+        self.setWindowTitle(("Edit chart" if block else "Add chart") + " — "
+                            + ("custom card" if layout.is_custom(tab) else tab["title"]))
         self.db = sqldata.for_context(win.data, win.dashboard.range)
         self.block = dict(block) if block else {"id": layout.new_id(), "type": "sql", "dash": True,
                                                   "export": True, "new_row": False, "size": 1}
@@ -1016,9 +1021,9 @@ class AddChartDialog(QDialog):
         if block and block.get("type") != "sql":
             spec = spec_from_block(tab, block)
         if block is None:
-            spec = default_spec(tab)
+            spec = default_spec(tab, win.data)
         self.hand_written = spec is None
-        spec = spec or default_spec(tab)
+        spec = spec or default_spec(tab, win.data)
         self._loading = True
 
         # ── Simple ──
@@ -1638,14 +1643,17 @@ class CardSettingsDialog(QDialog):
             form.addRow("Sections", self.split)
         self.action = None
         extra = QHBoxLayout()
-        new = QPushButton("+ New card for this tab")
+        custom = layout.is_custom(tab)
+        new = QPushButton("+ Another custom card" if custom else "+ New card for this tab")
         new.clicked.connect(lambda: self._done("new"))
         extra.addWidget(new)
-        if card["id"] not in ("main", "analysis") or in_view:
+        if custom:
+            self.combine.hide()
+        if card["id"] not in ("main", "analysis") or in_view or custom:
             delete = QPushButton("Remove this card from the view" if in_view else "Delete this card")
             delete.clicked.connect(lambda: self._done("delete"))
             extra.addWidget(delete)
-        if not in_view:
+        if not in_view and not custom:
             reset = QPushButton("Reset tab to built-in")
             reset.setToolTip("Go back to the app's own charts for every card of this tab")
             reset.clicked.connect(lambda: self._done("reset"))
@@ -4940,11 +4948,17 @@ class Dashboard(QScrollArea):
         tiles_btn.setObjectName("link")
         tiles_btn.setToolTip("Choose which tiles and cards show (on this computer)")
         tiles_btn.clicked.connect(lambda: self._tiles_menu(tabs, tiles_btn))
+        new_btn = QPushButton("+ New card")
+        new_btn.setObjectName("link")
+        new_btn.setToolTip("A card of your own, not tied to one tab: add any charts to it "
+                           "(admin, shared with everyone)")
+        new_btn.clicked.connect(lambda: QTimer.singleShot(0, self.win.new_custom_card))
+        head.addWidget(new_btn, 0, Qt.AlignBottom)
         head.addWidget(tiles_btn, 0, Qt.AlignBottom)
         root.addLayout(tiles)
         hidden_cards = set(self.win.hidden_cards())
 
-        for tab in tabs:
+        for tab in tabs + [layout.custom_tab()]:
             lo = self.win.layout_of(tab)
             for card in lo["cards"]:
                 if not card["dash"] or (card["id"] == "analysis" and not _visible_rows(tab)):
@@ -5092,7 +5106,7 @@ class Dashboard(QScrollArea):
         menu.addSection("Cards")
         hidden = set(self.win.hidden_cards())
         keys = []
-        for t in tabs:
+        for t in tabs + [layout.custom_tab()]:
             for card in self.win.layout_of(t)["cards"]:
                 if not card["dash"]:
                     continue
@@ -5242,10 +5256,11 @@ class Dashboard(QScrollArea):
             head.addWidget(edit)
             if hide:
                 head.addWidget(hide)
-            open_btn = QPushButton("Open table →")
-            open_btn.setObjectName("link")
-            open_btn.clicked.connect(lambda: self._go(tab["title"]))
-            head.addWidget(open_btn)
+            if not layout.is_custom(tab):           # a custom card has no table of its own
+                open_btn = QPushButton("Open table →")
+                open_btn.setObjectName("link")
+                open_btn.clicked.connect(lambda: self._go(tab["title"]))
+                head.addWidget(open_btn)
         lay_.addLayout(head)
 
         if not preview and not editing and card is lo["cards"][0]:
@@ -5299,7 +5314,10 @@ class Dashboard(QScrollArea):
             gallery.setObjectName("dashed")
             gallery.clicked.connect(lambda: self._gallery_menu(tab, card, gallery))
             add_row.addWidget(add, 1)
-            add_row.addWidget(gallery, 1)
+            if layout.gallery(tab):                   # the tab's own charts (a custom card has none)
+                add_row.addWidget(gallery, 1)
+            else:
+                gallery.deleteLater()
             lay_.addLayout(add_row)
             lay_.addWidget(_small_label("Drag ⠿ to move a chart (drop it on another chart) · drag a "
                                         "chart's right edge to resize · ⋯ for edit, export and more", MUTED))
@@ -6305,6 +6323,8 @@ class TrackerApp(QMainWindow):
     # editing saves it to the sheet for everyone, Cancel throws it away.
 
     def _tab(self, title):
+        if title == layout.CUSTOM:
+            return layout.custom_tab()
         return next((t for t in (self.data or {}).get("tabs", []) if t["title"] == title), None)
 
     def start_editing(self, tab, card_id, add_column=None):
@@ -6335,11 +6355,12 @@ class TrackerApp(QMainWindow):
             return
         settings, stored = unlocked
         lo = layout.copy_layout(layout.layout_for(tab, settings))
-        card = next((c for c in lo["cards"] if c["id"] == card_id), lo["cards"][0])
-        self.editing = {"tab": tab["title"], "card": card["id"], "layout": lo,
+        card = next((c for c in lo["cards"] if c["id"] == card_id), lo["cards"][0] if lo["cards"] else None)
+        self.editing = {"tab": tab["title"], "card": card["id"] if card else None, "layout": lo,
                         "settings": settings, "stored": stored, "base": getattr(self, "_settings_base", None)}
         self.dashboard.set_data(self.data)
-        self._set_status(f"Editing {layout.card_title(tab, card)} — Done editing saves it for everyone.")
+        if card:
+            self._set_status(f"Editing {layout.card_title(tab, card)} — Done editing saves it for everyone.")
         if add_column:
             col = layout.find_column(tab, add_column)
             spec = default_spec(tab)
@@ -6384,7 +6405,7 @@ class TrackerApp(QMainWindow):
         else:
             lo = dict(e["layout"], columns=[c["name"].strip() for c in (tab or {}).get("columns", [])])
             settings[key] = layout.dump(lo)
-        if tab:
+        if tab and not layout.is_custom(tab):
             known = self.known_columns(tab)
             known += [c["name"].strip() for c in tab["columns"] if c["name"].strip() not in known]
             store.save_config(self.cfg)
@@ -6394,6 +6415,33 @@ class TrackerApp(QMainWindow):
             merge = {key: _card_merger(tab, e["base"], e["layout"], settings[key])}
         self._save_settings(settings, f"Saved the {e['tab']} cards for everyone.", base=e.get("base"),
                             merge=merge)
+
+    def new_custom_card(self):
+        """+ New card on the dashboard: a card not tied to one tab. Opens it for editing with the
+        Add chart form ready; Done editing saves it for everyone (Cancel throws it away)."""
+        if self.current_view() is not None:
+            QMessageBox.information(self, "New card", "Custom cards go on the main dashboard. Switch "
+                                    "to Main, or add a card to this view from its settings.")
+            return
+        name, ok = QInputDialog.getText(self, "New card", "Card title:")
+        if not ok or not name.strip():
+            return
+        tab = layout.custom_tab()
+        if self.editing:
+            self.start_editing(tab, None)              # asks to save the card being edited first
+            if not self.editing or self.editing["tab"] != layout.CUSTOM:
+                return
+        else:
+            self.start_editing(tab, None)
+            if not self.editing:
+                return                                 # passcode cancelled
+        card = layout.new_custom_card(name.strip())
+        self.editing["layout"]["cards"].append(card)
+        self.editing["card"] = card["id"]
+        self.editing["reset"] = False
+        self._redraw()
+        self._set_status(f"New card “{card['title']}” — add charts, then Done editing saves it for everyone.")
+        QTimer.singleShot(0, lambda: self.add_chart(tab, card))
 
     def edit_card_colors(self, tab, card):
         """✎ Edit → Colours…: the card's own colours, kept in the copy being edited (Done

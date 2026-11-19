@@ -1,5 +1,8 @@
 # What's new
 
+## 2.4.17
+- **Custom cards.** *+ New card* (top of the dashboard, next to Show ▾) makes a card that isn't tied to one tab. Give it a title and add any charts: the Add chart form can count any tab (Simple), or write your own SQL across tabs. Custom cards come after the sheet's cards, are edited, coloured and hidden like any other card, are saved for everyone (admin passcode), and are in the export ticked. All existing cards stay as they are.
+
 ## 2.4.16
 - **Tables in dark exports fixed.** Every other row of a card's table (e.g. VT1 Device Recovery) showed as a white bar with unreadable text in the dark export. The stripe, links and text now use the export's dark colours.
 

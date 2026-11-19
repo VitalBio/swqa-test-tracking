@@ -154,6 +154,8 @@ def _has_data(tab, rows, col):
     return any(store.value_of(tab, r, col).strip() for r in rows)
 
 def default_layout(tab, settings=None):
+    if is_custom(tab):
+        return {"cards": [], "columns": []}
     rows = [r for r in tab["rows"] if not store.is_blank(r)]
     run, bug, ticket = store.is_run_tab(tab), store.is_bug_tab(tab), store.is_ticket_tab(tab)
     status = store.derived_columns(tab).get(store.STATUS)
@@ -267,6 +269,8 @@ def gallery(tab):
 
 
 def card_title(tab, card):
+    if is_custom(tab):
+        return card.get("title") or "Custom card"
     if card.get("title"):
         return card["title"].replace("{tab}", tab["title"])
     if card["id"] == "analysis":
@@ -277,7 +281,28 @@ def card_title(tab, card):
 # ── saved layouts ─────────────────────────────────────────────────────────────
 
 def key_for(tab):
+    if is_custom(tab):
+        return CUSTOM_KEY
     return LAYOUT_PREFIX + tab["title"].strip().lower()
+
+
+# ── custom cards: dashboard cards that don't belong to a sheet tab ─────────────
+# They live in a stand-in tab with no rows or columns, so they're edited, coloured,
+# hidden, saved for everyone and exported exactly like the other cards. Their charts
+# are queries (Add chart → Simple or SQL), which can count any tab in the sheet.
+
+CUSTOM = "@custom"                       # the stand-in tab's title (never shown)
+CUSTOM_KEY = LAYOUT_PREFIX + CUSTOM
+
+def custom_tab():
+    return {"title": CUSTOM, "columns": [], "rows": [], "custom": True}
+
+def is_custom(tab):
+    return bool(tab) and (tab.get("custom") or tab.get("title") == CUSTOM)
+
+def new_custom_card(title):
+    return {"id": new_id(), "title": title, "dash": True, "export": True, "combine": False,
+            "split": None, "blocks": []}
 
 def _clean(layout):
     """Fill in anything missing (layouts saved by older versions, hand edits)."""
@@ -302,6 +327,18 @@ def _clean(layout):
 def layout_for(tab, settings=None):
     """The admin's saved layout for this tab, or the built-in default."""
     raw = (settings or {}).get(key_for(tab))
+    if is_custom(tab):                           # no built-in cards: only the ones made by hand
+        try:
+            saved = json.loads(raw) if raw else {}
+        except ValueError:
+            saved = {}
+        saved = saved if isinstance(saved, dict) else {}
+        saved.setdefault("cards", [])
+        saved["custom"] = True
+        saved = _clean(saved)
+        for card in saved["cards"]:
+            card.setdefault("split", None)
+        return saved
     if raw:
         try:
             saved = json.loads(raw)

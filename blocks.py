@@ -683,6 +683,10 @@ def short_name(title):
 
 def card_note(card, tabs, ctx):
     """The grey line next to a card's title, e.g. “6 failed runs · Today (Oct 7)”."""
+    if lay.is_custom(tabs[0]):                  # a custom card: its charts say what they count
+        uses_dates = any(":start" in (b.get("sql") or "") or ":end" in (b.get("sql") or "")
+                         for b in card["blocks"])
+        return "Custom card" + (f" · {ctx.range_text}" if ctx.rng and uses_dates else "")
     if card["id"] == "analysis":
         tab = tabs[0]
         if store.is_ticket_tab(tab):
