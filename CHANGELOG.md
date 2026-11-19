@@ -1,5 +1,8 @@
 # What's new
 
+## 2.4.13
+- **Export sections list fixed.** No more sideways scroll bar: each section's chart ticks wrap to fit the window. And the list no longer shows a second, stale copy of itself behind it after you change something.
+
 ## 2.4.12
 - **What's new.** A *What's new* link in the bottom-right corner shows what changed in each version. After an update it opens once by itself with just what's new since the version you had.
 - **Export any dashboard card.** Every dashboard card is now in the export's list of sections, each with a tick per chart: the VT1 tests, Closed Drawer Tube Check, Hardware Support Tickets and the rest. Cards the built-in sections don't cover start ticked; the end-to-end and Bug Statuses cards are there to tick if you want them as they look on the dashboard. Cards split by product follow the export's VitalOne / Viking choice (side by side or combined).

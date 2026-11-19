@@ -19,7 +19,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLayout,
     QLabel, QLineEdit, QPushButton, QTableView, QHeaderView, QMessageBox, QFrame,
     QDialog, QFormLayout, QDialogButtonBox, QFileDialog, QShortcut, QComboBox,
     QCheckBox, QTabWidget, QScrollArea, QStyledItemDelegate, QDateEdit, QMenu,
@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import (
     Qt, QObject, QRunnable, QThreadPool, QTimer, QUrl, QDate, pyqtSignal,
-    QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QPointF, QEvent
+    QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QPointF, QEvent, QRect, QPoint, QSize
 )
 from PyQt5.QtGui import (
     QFont, QColor, QPalette, QKeySequence, QDesktopServices, QPixmap, QPainter, QIcon,
@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.12"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.13"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -2842,6 +2842,66 @@ class ArrangePanel(QWidget):
         self.changed.emit()
 
 
+class _FlowLayout(QLayout):
+    """Lays its items out left to right and wraps to the next line when the width runs
+    out (like words in a paragraph), so it never needs a sideways scroll bar."""
+
+    def __init__(self, parent=None, h=14, v=2):
+        super().__init__(parent)
+        self._items, self._h, self._v = [], h, v
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do(QRect(0, 0, width, 0), apply=False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do(rect, apply=True)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for it in self._items:
+            size = size.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do(self, rect, apply):
+        m = self.contentsMargins()
+        r = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y, line = r.x(), r.y(), 0
+        # same-width columns when they fit, so ticks line up from row to row
+        col = max((it.sizeHint().width() for it in self._items), default=0)
+        for it in self._items:
+            w = col if col + self._h <= r.width() else it.sizeHint().width()
+            if x + w > r.right() + 1 and line:
+                x, y, line = r.x(), y + line + self._v, 0
+            if apply:
+                it.setGeometry(QRect(QPoint(x, y), it.sizeHint()))
+            x += w + self._h
+            line = max(line, it.sizeHint().height())
+        return y + line - rect.y() + m.bottom()
+
+
 class SectionsPanel(QWidget):
     """The simple export: which products, and which sections (in order) with their options."""
     changed = pyqtSignal()
@@ -2883,6 +2943,7 @@ class SectionsPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)   # options wrap instead
         scroll.setWidget(holder)
         root.addWidget(scroll, 1)
         self._build()
@@ -2890,8 +2951,11 @@ class SectionsPanel(QWidget):
     def _build(self):
         while self.list_box.count():
             item = self.list_box.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w:                                  # gone now: deleteLater waits for the dialog to close,
+                w.hide()                           # which left the old list showing behind the new one
+                w.setParent(None)
+                w.deleteLater()
         self.rows = {}
         order = self.cfg["order"]
         for i, sid in enumerate(order):
@@ -2919,18 +2983,15 @@ class SectionsPanel(QWidget):
             v.addLayout(head)
             boxes = {}
             if opts:
-                grid = QGridLayout()
-                grid.setContentsMargins(58, 0, 0, 0)
-                grid.setHorizontalSpacing(14)
-                grid.setVerticalSpacing(2)
-                for k, (key, label, _) in enumerate(opts):
+                flow = _FlowLayout(h=18, v=4)
+                flow.setContentsMargins(58, 0, 0, 0)
+                for key, label, _ in opts:
                     c = QCheckBox(label)
                     c.setChecked(bool(self.cfg["opts"].get(sid, {}).get(key)))
                     c.toggled.connect(self._edited)
                     boxes[key] = c
-                    grid.addWidget(c, k // 3, k % 3)
-                grid.setColumnStretch(3, 1)
-                v.addLayout(grid)
+                    flow.addWidget(c)
+                v.addLayout(flow)
             if sid.startswith(export_sections.CARD):
                 note = _small_label(f"The charts on the {name} dashboard card.", MUTED)
                 note.setContentsMargins(58, 0, 0, 0)
