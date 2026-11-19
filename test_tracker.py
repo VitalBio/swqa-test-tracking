@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.14"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.15"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -3841,23 +3841,24 @@ class EditTile(QFrame):
     def _menu(self, parent):
         b, win, tab, card = self.b, self.win, self.tab, self.card
         m = QMenu(parent)
-        m.addAction("Edit…", lambda: win.edit_block(tab, card, b["id"]))
-        m.addAction("Duplicate", lambda: win.duplicate_block(tab, card, b["id"]))
+        later = lambda fn: QTimer.singleShot(0, fn)     # after the menu closes: these redraw the card
+        m.addAction("Edit…", lambda: later(lambda: win.edit_block(tab, card, b["id"])))
+        m.addAction("Duplicate", lambda: later(lambda: win.duplicate_block(tab, card, b["id"])))
         m.addSeparator()
         for label, key in (("Start a new row", "new_row"), ("Show on the dashboard", "dash"),
                            ("Include in the export", "export")):
             act = m.addAction(label)
             act.setCheckable(True)
             act.setChecked(bool(b.get(key)))
-            act.toggled.connect(lambda on, k=key: win.set_block(tab, card, b["id"], **{k: on}))
+            act.toggled.connect(lambda on, k=key: later(lambda: win.set_block(tab, card, b["id"], **{k: on})))
         size = m.addMenu("Size")
         for n in (1, 2, 3, 4):
             act = size.addAction({1: "Small", 2: "Medium", 3: "Large", 4: "Extra large"}[n])
             act.setCheckable(True)
             act.setChecked(int(b.get("size") or 1) == n)
-            act.triggered.connect(lambda _, n=n: win.set_block(tab, card, b["id"], size=n))
+            act.triggered.connect(lambda _, n=n: later(lambda: win.set_block(tab, card, b["id"], size=n)))
         m.addSeparator()
-        m.addAction("Remove", lambda: win.remove_block(tab, card, b["id"]))
+        m.addAction("Remove", lambda: later(lambda: win.remove_block(tab, card, b["id"])))
         return m
 
     # ── drag to move ──────────────────────────────────────────────────────────
@@ -4922,8 +4923,7 @@ class Dashboard(QScrollArea):
             self._view_cards(root, data, view)
             self._notice(notice)
             root.addStretch(1)
-            self.setWidget(body)
-            self.body = body
+            self._swap(body)
             QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(pos))
             return
 
@@ -4960,9 +4960,22 @@ class Dashboard(QScrollArea):
                                                 f"{type(exc).__name__}: {exc}", RED))
         self._notice(notice)
         root.addStretch(1)
+        self._swap(body)
+        QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(pos))
+
+    def _swap(self, body):
+        """Show the new dashboard. The old one is hidden now and deleted once Qt is done with
+        whatever rebuilt it: setWidget() would delete it at once, and if that came from a
+        button or menu on the old dashboard (+ Add chart, ▦ gallery, ⋯), Qt went on using the
+        deleted button or menu and the app crashed."""
+        old = self.takeWidget()
         self.setWidget(body)
         self.body = body
-        QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(pos))
+        if old is not None:
+            old.hide()
+            old.setParent(None)
+            QTimer.singleShot(0, old.deleteLater)
+            self._old_bodies = [old]               # keep Python's reference until then
 
     def _view_cards(self, root, data, view):
         e = self.win.editing
@@ -5281,7 +5294,7 @@ class Dashboard(QScrollArea):
             add_row = QHBoxLayout()
             add = QPushButton("+ Add chart")
             add.setObjectName("dashed")
-            add.clicked.connect(lambda: self.win.add_chart(tab, card))
+            add.clicked.connect(lambda: QTimer.singleShot(0, lambda: self.win.add_chart(tab, card)))
             gallery = QPushButton("▦ Add from gallery ▾")
             gallery.setObjectName("dashed")
             gallery.clicked.connect(lambda: self._gallery_menu(tab, card, gallery))
@@ -5370,7 +5383,7 @@ class Dashboard(QScrollArea):
         menu = QMenu(button)
         for label, b in layout.gallery(tab):
             act = menu.addAction(label)
-            act.triggered.connect(lambda _, b=b: self.win.insert_block(tab, card, b))
+            act.triggered.connect(lambda _, b=b: QTimer.singleShot(0, lambda: self.win.insert_block(tab, card, b)))
         menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
 
     def _part(self, tab, part, target):
@@ -6324,7 +6337,7 @@ class TrackerApp(QMainWindow):
         lo = layout.copy_layout(layout.layout_for(tab, settings))
         card = next((c for c in lo["cards"] if c["id"] == card_id), lo["cards"][0])
         self.editing = {"tab": tab["title"], "card": card["id"], "layout": lo,
-                        "settings": settings, "stored": stored, "base": self._settings_base}
+                        "settings": settings, "stored": stored, "base": getattr(self, "_settings_base", None)}
         self.dashboard.set_data(self.data)
         self._set_status(f"Editing {layout.card_title(tab, card)} — Done editing saves it for everyone.")
         if add_column:
@@ -6838,7 +6851,44 @@ class TrackerApp(QMainWindow):
         super().closeEvent(event)
 
 
+ERROR_LOG = os.path.join(store.DATA_DIR, "errors.log")
+
+def _install_error_net():
+    """An unexpected Python error is written to errors.log and shown as a message, instead of
+    PyQt's default of closing the app on the spot. A hard crash (inside Qt) also leaves its
+    stack in errors.log, so it can be found afterwards."""
+    import faulthandler, traceback
+    try:
+        if os.path.exists(ERROR_LOG) and os.path.getsize(ERROR_LOG) > 2_000_000:
+            os.replace(ERROR_LOG, ERROR_LOG + ".old")
+        log = open(ERROR_LOG, "a", encoding="utf-8")
+        log.write(f"\n── started v{APP_VERSION} at {datetime.now():%Y-%m-%d %H:%M:%S}\n")
+        log.flush()
+        faulthandler.enable(log)
+    except OSError:
+        log = None
+    showing = [False]
+
+    def hook(kind, value, tb):
+        text = "".join(traceback.format_exception(kind, value, tb))
+        sys.__stderr__.write(text)
+        if log:
+            log.write(f"\n{datetime.now():%Y-%m-%d %H:%M:%S} v{APP_VERSION}\n{text}")
+            log.flush()
+        if showing[0] or QApplication.instance() is None:
+            return
+        showing[0] = True
+        try:
+            QMessageBox.warning(QApplication.activeWindow(), "Something went wrong",
+                                f"That didn't work: {kind.__name__}: {value}\n\nThe app is still running. "
+                                f"Details were saved to:\n{ERROR_LOG}")
+        finally:
+            showing[0] = False
+    sys.excepthook = hook
+
+
 if __name__ == "__main__":
+    _install_error_net()
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QApplication(sys.argv)

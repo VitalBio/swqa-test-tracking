@@ -1,5 +1,9 @@
 # What's new
 
+## 2.4.15
+- **Fixed: the app closing when you add a chart.** Picking a chart from *▦ Add from gallery*, or using a chart's *⋯* menu (Duplicate, Size, Remove, Edit…), rebuilt the dashboard while the menu was still open, and the app crashed. The dashboard now rebuilds after the menu closes.
+- **Errors no longer close the app.** If something unexpected goes wrong, you get a message and the app keeps running. Details go to `errors.log` in the app's folder (~/Library/Application Support/TestTracker), so problems can be tracked down.
+
 ## 2.4.14
 - **Admins no longer undo each other's changes.** Saving cards, colours, views, filters or change logs used to write back this app's whole copy of the shared settings, which put back anything another admin had changed since your last sync (e.g. you save a colour and their card edits vanish). Now only what you changed is saved, on top of the sheet as it is at that moment. Two admins editing different cards of the same tab at the same time both keep their changes too.
 
