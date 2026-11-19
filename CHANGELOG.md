@@ -1,5 +1,8 @@
 # What's new
 
+## 2.4.16
+- **Tables in dark exports fixed.** Every other row of a card's table (e.g. VT1 Device Recovery) showed as a white bar with unreadable text in the dark export. The stripe, links and text now use the export's dark colours.
+
 ## 2.4.15
 - **Fixed: the app closing when you add a chart.** Picking a chart from *▦ Add from gallery*, or using a chart's *⋯* menu (Duplicate, Size, Remove, Edit…), rebuilt the dashboard while the menu was still open, and the app crashed. The dashboard now rebuilds after the menu closes.
 - **Errors no longer close the app.** If something unexpected goes wrong, you get a message and the app keeps running. Details go to `errors.log` in the app's folder (~/Library/Application Support/TestTracker), so problems can be tracked down.

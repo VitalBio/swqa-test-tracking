@@ -125,6 +125,22 @@ class Kit:
             p.drawText(QRectF(x, y, width, h), Qt.AlignLeft | Qt.AlignVCenter, s)
         return Item(h, draw)
 
+    def retheme(self, html_):
+        """Dashboard HTML (drawn for the app) in this export theme: its text greys, link blue
+        and the light stripe on every other table row, which showed as a white bar on dark."""
+        import ui_theme
+        t = self.t
+        swaps = []
+        originals = (("#1A1A18", "ink"), ("#52514E", "ink2"), ("#8A8984", "muted"), ("#2F5E9E", "link"))
+        for orig, key in originals:                # as written, or as the app's light / dark look changed it
+            for v in {orig, ui_theme.LIGHT_TEXT.get(orig, orig), ui_theme.DARK_TEXT.get(orig, orig)}:
+                swaps.append((f"color:{v}", f"color:{t[key]}"))
+        for stripe in ("#F7F7F5", ui_theme.DARK_FILL.get("#F7F7F5", "#F7F7F5"), ui_theme.LIGHT_FILL.get("#F7F7F5", "#F7F7F5")):
+            swaps.append((f'bgcolor="{stripe}"', f'bgcolor="{t["tile"]}"'))
+        for a, b in swaps:
+            html_ = html_.replace(a, b).replace(a.lower(), b)
+        return html_
+
     def rich(self, body, width, px=14, color="ink"):
         """Rich text (links, wrapping), via QTextDocument so PDF links work."""
         doc = QTextDocument()
@@ -501,9 +517,8 @@ class Painter(es.Renderer):
             kind = built[0][0]
             return kind, lambda w, bs=built: vstack(([k.label(label, w)] if label else [])
                                                      + [b[1](w) for b in bs], 8)
-        if isinstance(c, str):                       # e.g. a legend: the dashboard's greys → this theme's
-            c = c.replace(f"color:{blocks.INK2}", f"color:{k.t['ink2']}").replace(
-                f"color:{blocks.MUTED}", f"color:{k.t['muted']}").replace("font-size:11px", "font-size:13px")
+        if isinstance(c, str):                       # e.g. a legend or a table: the dashboard's colours → this theme's
+            c = k.retheme(c).replace("font-size:11px", "font-size:13px")
             return "wide", lambda w, c=c: vstack(([k.label(label, w)] if label else []) + [k.rich(c, w, 13)], 6)
         if isinstance(c, charts.DonutChart):
             big, small = c.center
