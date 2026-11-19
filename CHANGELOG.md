@@ -1,8 +1,15 @@
 # What's new
 
+## 2.4.12
+- **What's new.** A *What's new* link in the bottom-right corner shows what changed in each version. After an update it opens once by itself with just what's new since the version you had.
+- **Export any dashboard card.** Every dashboard card is now in the export's list of sections, each with a tick per chart: the VT1 tests, Closed Drawer Tube Check, Hardware Support Tickets and the rest. Cards the built-in sections don't cover start ticked; the end-to-end and Bug Statuses cards are there to tick if you want them as they look on the dashboard. Cards split by product follow the export's VitalOne / Viking choice (side by side or combined).
+- **Colours per card.** ✎ Edit on a card → *🎨 Colours…* sets that card's own colours, saved for everyone with Done editing (admin passcode, as before). Nothing changes until you pick: anything a card doesn't set keeps today's colour. When another card already colours the same value, it's offered as a suggestion ("Use colour from …"). The old sheet-wide colours are now *Default chart colours…* in Settings.
+- Empty pies in exports no longer pick up a stray fill colour.
+- The 2.4.11 Slack webhook step was removed: release announcements come from the GitHub app for Slack.
+
 ## 2.4.11
 - **Pie charts with nothing in the dates keep their place.** An empty pie shows as a grey "0 rows" ring in its row (on the dashboard and in exports) instead of a line of text that pushed the rest of the row down. A row of pies stays a row.
-- **Slack announcement on release.** Stable releases post their notes to a Slack channel once the repo's SLACK_WEBHOOK_URL secret is set.
+- **Slack announcement on release.** Stable releases post their notes to a Slack channel once the repo's SLACK_WEBHOOK_URL secret is set. (Replaced in 2.4.12 by the GitHub app for Slack.)
 
 ## 2.4.10
 - **Hardware support requests In Testing or Monitored no longer count as open.** They've been looked at and fixed, so the instrument isn't shown as HARDWARE SUPPORT REQUESTED (in the app and the export). Open means In Progress, Triage, Diagnosing…

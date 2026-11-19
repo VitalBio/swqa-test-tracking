@@ -12,6 +12,7 @@ cd "$(dirname "$0")"
     --name "Test Tracker" \
     --icon assets/icon.icns \
     --osx-bundle-identifier com.vitalbio.test-tracker \
+    --add-data "CHANGELOG.md:." \
     test_tracker.py
 
 # Stamp the version from test_tracker.py into the app (shown in Finder → Get Info),

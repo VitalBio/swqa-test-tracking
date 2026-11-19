@@ -219,6 +219,7 @@ class Kit:
                 start += span
             if not slices:                                # nothing in the dates: an empty grey ring
                 p.setPen(QPen(self.c("muted"), ring))
+                p.setBrush(Qt.NoBrush)
                 p.setOpacity(0.25)
                 p.drawEllipse(rect.adjusted(ring / 2, ring / 2, -ring / 2, -ring / 2))
                 p.setOpacity(1.0)
@@ -395,7 +396,7 @@ class Painter(es.Renderer):
 
     def build(self, sid, width):
         if sid.startswith(es.CARD):
-            made = self.b_card(sid[len(es.CARD):], width)
+            made = self.b_card(sid, width)
         else:
             made = getattr(self, "b_" + sid)(width)
         if made is None:
@@ -442,36 +443,51 @@ class Painter(es.Renderer):
 
     # a tracker's own card (e.g. New Disc Trays) ──────────────────────────────
 
-    def b_card(self, title, width):
-        tab = next((t for t in self.data.get("tabs", []) if t["title"] == title), None)
-        if tab is None:
+    def b_card(self, sid, width):
+        """Any dashboard card: its ticked charts, donuts side by side and the rest full
+        width, in the card's own colours. A card split by product (VitalOne / Viking)
+        follows the export's products: side by side gets a labelled part per product."""
+        tab, card = es.find_card(self.data, sid)
+        if card is None:
             return None
-        k, ctx, sid = self.k, self.ctx, es.CARD + title
+        k, ctx = self.k, self.ctx
         wanted = self.cfg["opts"].get(sid, {})
-        by_id = {b["id"]: b for card in lay.layout_for(tab, ctx.settings)["cards"] for b in card["blocks"]}
-        donuts, wide = [], []
-        for bid, _ in es.card_blocks(tab, ctx.settings):
-            if not wanted.get(bid, True) or bid not in by_id:
-                continue
-            try:
-                parts = blocks.render(by_id[bid], [tab], ctx)
-            except Exception:
-                parts = None
-            for part in parts or []:
-                made = self._part(part, width, part.title)
-                if made is not None:
-                    (donuts if made[0] == "donut" else wide).append(made[1])
-        if not donuts and not wide:
-            return None
+        chosen = [b for b in card["blocks"] if b.get("dash", True) and wanted.get(b["id"], True)]
+        groups = [(n, test) for n, test in (lay.split_groups(tab, card) or []) if es.chosen(self.cfg, n)]
+        if not groups:
+            parts_of = [(None, ctx)]
+        elif self.cfg["split"] and len(groups) > 1:
+            parts_of = [(n, ctx.section(test)) for n, test in groups]
+        elif len(groups) == 1:
+            parts_of = [(None, ctx.section(groups[0][1]))]
+        else:
+            parts_of = [(None, ctx)]
         body = []
         cols = 2 if width < 900 else 3
-        for i in range(0, len(donuts), cols):        # donuts side by side, the rest full width
-            row = donuts[i:i + cols]
-            row += [lambda w: spacer(0)] * (cols - len(row))
-            body.append(hstack(row, width, 36))
-        body += [build(width) for build in wide]
-        n = len(ctx.rows(tab))
-        return blocks.short_name(title), f"{n} run{'s' if n != 1 else ''} · {ctx.range_text}", vstack(body, 22)
+        with charts.card_colors(card.get("colors")):
+            for name, sub in parts_of:
+                donuts, wide = [], []
+                for b in chosen:
+                    try:
+                        parts = blocks.render(b, [tab], sub)
+                    except Exception:
+                        parts = None
+                    for part in parts or []:
+                        made = self._part(part, width, part.title)
+                        if made is not None:
+                            (donuts if made[0] == "donut" else wide).append(made[1])
+                if not donuts and not wide:
+                    continue
+                if name:
+                    body.append(k.label(name, width))
+                for i in range(0, len(donuts), cols):        # donuts side by side, the rest full width
+                    row = donuts[i:i + cols]
+                    row += [lambda w: spacer(0)] * (cols - len(row))
+                    body.append(hstack(row, width, 36))
+                body += [build(width) for build in wide]
+        if not body:
+            return None
+        return lay.card_title(tab, card), blocks.card_note(card, [tab], ctx), vstack(body, 22)
 
     def _part(self, part, width, title):
         """A dashboard Part → ("donut" | "wide", builder(width) → Item), in this design."""

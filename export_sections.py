@@ -43,10 +43,13 @@ SECTIONS = {
     "changelog": ("Change Log", [("counts", "Category Counts", True), ("qa", "In QA", True)]),
 }
 
-# ── card sections: a run tracker that isn't an end-to-end one (e.g. New Disc Trays) ──
-# gets a section of its own, drawn from its dashboard card, with a tick for each chart.
+# ── card sections: every dashboard card can go in the export, each a section of its
+# own with a tick for each chart. Keyed "card:<tab title>::<card id>". Cards the built-in
+# sections don't cover (New Disc Trays, VT1 tests…) start ticked; the end-to-end and bug
+# cards are there to tick when you want them as they look on the dashboard.
 
 CARD = "card:"
+SEP = "::"
 
 def is_e2e(tab):
     """VitalOne / Viking End-to-End Tracker — the runs the End-to-End sections are about."""
@@ -54,46 +57,80 @@ def is_e2e(tab):
     return "end-to-end" in t or "end to end" in t or "e2e" in store._words(t)
 
 def card_tabs(data):
-    return [t for t in (data or {}).get("tabs", []) if store.is_run_tab(t) and not is_e2e(t)]
+    """Tabs whose cards start ticked: everything the built-in sections don't already
+    cover (the end-to-end trackers and the bug tab have sections of their own)."""
+    return [t for t in (data or {}).get("tabs", []) if not is_e2e(t) and not store.is_bug_tab(t)]
 
-def card_blocks(tab, settings):
-    """[(block id, title)] — the charts on a tab's dashboard cards."""
+def card_sid(tab, card):
+    return f"{CARD}{tab['title']}{SEP}{card['id']}"
+
+def dashboard_cards(data):
+    """[(section id, tab, card)] for every card on the dashboard, in its order."""
     out = []
-    for card in lay.layout_for(tab, settings)["cards"]:
-        if not card.get("dash", True):
+    for t in (data or {}).get("tabs", []):
+        if not t.get("rows"):
             continue
-        for b in card["blocks"]:
-            if b.get("dash", True) and b["id"] not in {i for i, _ in out}:
-                out.append((b["id"], b.get("title") or lay.auto_title(tab, b)))
+        try:
+            cards = lay.layout_for(t, data.get("settings"))["cards"]
+        except Exception:
+            continue
+        for card in cards:
+            if card.get("dash", True) and any(b.get("dash", True) for b in card["blocks"]):
+                out.append((card_sid(t, card), t, card))
     return out
 
+def find_card(data, sid):
+    """(tab, card) for a card section id, or (None, None). An old "card:<tab>" id (from
+    before every card could be exported) means that tab's first card."""
+    rest = sid[len(CARD):]
+    title, _, cid = rest.partition(SEP)
+    tab = next((t for t in (data or {}).get("tabs", []) if t["title"] == title), None)
+    if tab is None:
+        return None, None
+    cards = [c for c in lay.layout_for(tab, data.get("settings"))["cards"] if c.get("dash", True)]
+    card = next((c for c in cards if c["id"] == cid), None) if cid else (cards[0] if cards else None)
+    return tab, card
+
+def card_blocks(tab, card):
+    """[(block id, title)] — the charts on one dashboard card."""
+    return [(b["id"], b.get("title") or lay.auto_title(tab, b)) for b in card["blocks"] if b.get("dash", True)]
+
 def sections_for(data=None):
-    """SECTIONS plus a card section for each tab in card_tabs."""
+    """SECTIONS plus a card section for every dashboard card."""
     out = dict(SECTIONS)
-    for t in card_tabs(data):
+    for sid, t, card in dashboard_cards(data):
         try:
-            opts = [(i, title, True) for i, title in card_blocks(t, data.get("settings"))]
+            opts = [(i, title, True) for i, title in card_blocks(t, card)]
         except Exception:
             opts = []
-        out[CARD + t["title"]] = (blocks.short_name(t["title"]), opts)
+        out[sid] = (lay.card_title(t, card), opts)
     return out
 
 def section_name(sid, data=None):
     if sid in SECTIONS:
         return SECTIONS[sid][0]
-    return blocks.short_name(sid[len(CARD):]) if sid.startswith(CARD) else sid
+    if sid.startswith(CARD):
+        if data is not None:
+            tab, card = find_card(data, sid)
+            if card is not None:
+                return lay.card_title(tab, card)
+        return blocks.short_name(sid[len(CARD):].partition(SEP)[0])
+    return sid
 
 def default_config(data=None):
     secs = sections_for(data)
+    starts_on = {f"{CARD}{t['title']}{SEP}" for t in card_tabs(data)}
     return {"order": list(secs), "on": {"e2e": True, "errors": True, "bugs": True, "testing": True,
-                                        "changelog": False, **{s: True for s in secs if s.startswith(CARD)}},
+                                        "changelog": False,
+                                        **{s: any(s.startswith(p) for p in starts_on)
+                                           for s in secs if s.startswith(CARD)}},
             "opts": {sid: {k: d for k, _, d in opts} for sid, (_, opts) in secs.items()},
             "products": {}, "split": True}
 
 def normalized(cfg, data=None):
     """A config with everything filled in (older or partial ones too). Without `data`,
     card sections already in the config are kept as they are."""
-    cfg = dict(cfg or {})
+    cfg = _migrate(dict(cfg or {}), data)
     base = default_config(data)
     known = set(base["order"]) if data is not None else \
         set(SECTIONS) | {s for s in cfg.get("order", []) if s.startswith(CARD)}
@@ -106,6 +143,23 @@ def normalized(cfg, data=None):
     base["products"] = dict(cfg.get("products") or {})
     base["split"] = cfg.get("split", True)
     return base
+
+
+def _migrate(cfg, data):
+    """"card:<tab>" (one section per tab, before every card could be exported) →
+    "card:<tab>::<first card id>", keeping its tick and chart choices."""
+    if data is None:
+        return cfg
+    def new(sid):
+        if not sid.startswith(CARD) or SEP in sid:
+            return sid
+        tab, card = find_card(data, sid)
+        return card_sid(tab, card) if card is not None else sid
+    cfg["order"] = [new(s) for s in cfg.get("order", [])]
+    for k in ("on", "opts"):
+        if isinstance(cfg.get(k), dict):
+            cfg[k] = {new(s): v for s, v in cfg[k].items()}
+    return cfg
 
 
 # ── products ──────────────────────────────────────────────────────────────────

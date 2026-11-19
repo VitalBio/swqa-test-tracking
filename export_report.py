@@ -197,7 +197,7 @@ class Snapshot:
 
     def card_titles(self):
         """{card key: title} for every card going into the export (for the arrange editor)."""
-        return {p["key"]: export_sections.section_name(p["section"]) if "section" in p
+        return {p["key"]: export_sections.section_name(p["section"], self.data) if "section" in p
                 else combined_title(p["card"], p["tabs"]) for p in self.planned}
 
     # ── page layouts ──────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ class Snapshot:
             pad = 28
             item = export_paint.Painter(self.data, self.ctx, self.sections, self.theme).build(
                 p["section"], width - 2 * pad)
-            title = export_sections.section_name(p["section"])
+            title = export_sections.section_name(p["section"], self.data)
             if item is None:
                 item = export_paint.vstack([export_paint.Kit(self.theme).heading(title, "", width - 2 * pad),
                                             export_paint.Kit(self.theme).note("Nothing to show.", width - 2 * pad)], 14)
@@ -413,7 +413,8 @@ class Snapshot:
             drawn = []
             for b in chosen:
                 try:
-                    parts = blocks.render(b, tabs, ctx)
+                    with charts.card_colors(card.get("colors")):
+                        parts = blocks.render(b, tabs, ctx)
                 except Exception as exc:                     # one broken chart doesn't stop the export
                     parts = [blocks.Part(lay.auto_title(tabs[0], b),
                                          f'<span style="color:{MUTED}">Couldn\'t draw this '

@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.11"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.12"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -296,8 +296,9 @@ class SettingsDialog(QDialog):
             "Share every sheet with the service-account email above as an Editor.", MUTED)
         hint.setWordWrap(True)
 
-        colors_btn = QPushButton("🎨 Chart colours…")
-        colors_btn.setToolTip("Admin only: change the colour of each status, for everyone")
+        colors_btn = QPushButton("🎨 Default chart colours…")
+        colors_btn.setToolTip("Admin only: the colours every card uses unless it has its own "
+                              "(✎ Edit → Colours… on a card), for everyone")
         colors_btn.clicked.connect(lambda: parent.open_colors(self))
         colors_btn.setEnabled(bool(parent.data) and parent.can_edit)
         columns_btn = QPushButton("🔎 Filters…")
@@ -607,6 +608,221 @@ class ColorsDialog(QDialog):
                                 "It takes effect when you click Save for everyone.")
         if dlg.exec_() == QDialog.Accepted:
             self.changed_passcode = dlg.passcode()
+
+
+class CardColorsDialog(QDialog):
+    """One card's own colours (✎ Edit → Colours…). Lists everything the card's charts
+    colour; a value this card doesn't set keeps the default colour (Default chart colours,
+    or built-in), so nothing changes until you pick. When another card already gives the
+    same value a colour, that's offered as a suggestion. Saved with Done editing, for everyone."""
+
+    def __init__(self, win, tab, card, others):
+        super().__init__(win)
+        self.setWindowTitle(f"Colours · {layout.card_title(tab, card)}")
+        self.setMinimumWidth(640)
+        self.colors = dict(card.get("colors") or {})
+        found = {}                                     # key → (label, section, default colour)
+        ctx = blocks.Ctx(None, "All dates", export=False, settings=_settings(win), data=win.data)
+        charts.register(win.data)
+        with charts.card_colors({}, record=found):     # all dates, so every value shows up
+            for b in card["blocks"]:
+                try:
+                    blocks.render(b, [tab], ctx)
+                except Exception:
+                    pass
+        self.found = found
+        # suggestions: the first other card that colours the same value differently
+        self.suggest = {}
+        for key, (_, _, default) in found.items():
+            for title, color in others.get(key, []):
+                if color.upper() != (self.colors.get(key) or default or "").upper():
+                    self.suggest[key] = (title, color)
+                    break
+
+        intro = QLabel("Click a colour to change it for <b>this card only</b>. Anything you don't "
+                       "change keeps its default colour, so the card looks the same until you pick. "
+                       "Saved for everyone when you click <b>Done editing</b>.")
+        intro.setWordWrap(True)
+        intro.setTextFormat(Qt.RichText)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
+        self.swatches, self.resets, self.hints, self.uses = {}, {}, {}, {}
+        i = 0
+        sections = list(dict.fromkeys(sec for _, sec, _ in found.values()))
+        for sec in sections:
+            head = _small_label(sec.upper(), "#888885", 10)
+            head.setStyleSheet("color:#888885; font-size:10px; font-weight:bold; margin-top:8px;")
+            grid.addWidget(head, i, 0, 1, 5)
+            i += 1
+            for key, (label, s_, _) in found.items():
+                if s_ != sec:
+                    continue
+                sw = QPushButton()
+                sw.setFixedSize(46, 26)
+                sw.setCursor(Qt.PointingHandCursor)
+                sw.clicked.connect(lambda _, k=key: self._pick(k))
+                name = QLabel(label)
+                name.setStyleSheet("font-size:13px;")
+                hint = _small_label("", MUTED)
+                use = None
+                if key in self.suggest:
+                    title, color = self.suggest[key]
+                    use = QPushButton(f"Use colour from {title}")
+                    use.setObjectName("link")
+                    pm = QPixmap(12, 12)
+                    pm.fill(QColor(color))
+                    use.setIcon(QIcon(pm))
+                    use.setToolTip(f"{color.upper()}: what {title} uses for {label}")
+                    use.clicked.connect(lambda _, k=key, c=color: self._set(k, c))
+                reset = QPushButton("Reset")
+                reset.setObjectName("link")
+                reset.setToolTip("Back to the default colour")
+                reset.clicked.connect(lambda _, k=key: self._set(k, None))
+                self.swatches[key], self.resets[key], self.hints[key], self.uses[key] = sw, reset, hint, use
+                grid.addWidget(sw, i, 0)
+                grid.addWidget(name, i, 1)
+                grid.addWidget(hint, i, 2)
+                if use:
+                    grid.addWidget(use, i, 3)
+                grid.addWidget(reset, i, 4)
+                i += 1
+        grid.setColumnStretch(2, 1)
+        inner = QWidget()
+        inner.setLayout(grid)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(inner)
+        scroll.setMinimumHeight(min(34 * i + 10, 460))
+
+        extra = QHBoxLayout()
+        if self.suggest:
+            use_all = QPushButton(f"Use all suggestions ({len(self.suggest)})")
+            use_all.clicked.connect(lambda: [self._set(k, c) for k, (_, c) in self.suggest.items()])
+            extra.addWidget(use_all)
+        reset_all = QPushButton("Reset all to default")
+        reset_all.clicked.connect(self._reset_all)
+        extra.addWidget(reset_all)
+        extra.addStretch(1)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Apply to card")
+        buttons.button(QDialogButtonBox.Ok).setObjectName("primary")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.addWidget(intro)
+        if not found:
+            root.addWidget(_small_label("This card's charts don't colour anything yet.", MUTED))
+        root.addWidget(scroll)
+        root.addLayout(extra)
+        root.addWidget(buttons)
+        self._refresh()
+
+    def color(self, key):
+        return self.colors.get(key) or self.found[key][2] or charts.PENDING
+
+    def _refresh(self):
+        for key, sw in self.swatches.items():
+            c = self.color(key)
+            sw.setStyleSheet(f"QPushButton {{ background:{c}; border:1px solid #BDBBB6; border-radius:5px; }}"
+                             f"QPushButton:hover {{ border:2px solid #1A1A18; }}")
+            sw.setToolTip(f"{c.upper()} — click to change")
+            own = key in self.colors
+            self.resets[key].setVisible(own)
+            self.hints[key].setText("this card" if own else "default")
+            if self.uses[key]:
+                self.uses[key].setVisible(self.color(key).upper() != self.suggest[key][1].upper())
+
+    def _pick(self, key):
+        c = QColorDialog.getColor(QColor(self.color(key)), self, f"Colour for {self.found[key][0]}")
+        if c.isValid():
+            self._set(key, c.name().upper())
+
+    def _set(self, key, color):
+        if color is None or color.upper() == (self.found[key][2] or "").upper():
+            self.colors.pop(key, None)                 # same as the default: nothing to keep
+        else:
+            self.colors[key] = color.upper()
+        self._refresh()
+
+    def _reset_all(self):
+        for key in list(self.found):
+            self.colors.pop(key, None)
+        self._refresh()
+
+
+# ── what's new ────────────────────────────────────────────────────────────────
+
+def _changelog_text():
+    """CHANGELOG.md, bundled into the app by build_mac.sh (next to this file when run from source)."""
+    here = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    try:
+        with open(os.path.join(here, "CHANGELOG.md"), encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+def _changelog_sections(text):
+    """[(version tuple or None, heading, markdown body)] in the file's order (newest first)."""
+    out = []
+    for m in re.finditer(r"^## (.+?)\n(.*?)(?=^## |\Z)", text, re.S | re.M):
+        head = m.group(1).strip()
+        out.append((_version_tuple(head) if re.match(r"v?\d+\.\d+\.\d+", head) else None,
+                    head, m.group(2).strip()))
+    return out
+
+
+class WhatsNewDialog(QDialog):
+    """What changed in each version (from CHANGELOG.md). After an update it opens once by
+    itself, showing just what's new since the version you had."""
+
+    def __init__(self, parent, since=None):
+        super().__init__(parent)
+        self.setWindowTitle("What's new")
+        self.resize(680, 640)
+        secs = _changelog_sections(_changelog_text())
+        newer = [s for s in secs if since and s[0] and s[0] > _version_tuple(since)]
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        title = QLabel(f"What's new in v{APP_VERSION}" if newer else "What's new")
+        title.setStyleSheet("font-size:20px; font-weight:bold;")
+        root.addWidget(title)
+        sub = (f"Updated from v{since} · {len(newer)} version{'s' if len(newer) != 1 else ''} of changes"
+               if newer else f"You have v{APP_VERSION}" + (" (testing build)" if APP_CHANNEL == "testing" else ""))
+        root.addWidget(_small_label(sub, MUTED))
+        self.view = QTextBrowser()
+        self.view.setOpenExternalLinks(True)
+        self.view.setFrameShape(QFrame.NoFrame)
+        self.view.setStyleSheet("QTextBrowser { background: transparent; font-size:13px; }")
+        root.addWidget(self.view, 1)
+        self.all_btn = QPushButton("Show every version")
+        self.all_btn.setObjectName("link")
+        self.all_btn.clicked.connect(lambda: (self._show(secs), self.all_btn.hide()))
+        self.all_btn.setVisible(bool(newer))
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.Close).clicked.connect(self.reject)
+        row = QHBoxLayout()
+        row.addWidget(self.all_btn)
+        row.addStretch(1)
+        row.addWidget(buttons)
+        root.addLayout(row)
+        self._show(newer or secs)
+
+    def _show(self, secs):
+        mine = _version_tuple(APP_VERSION)
+        md = []
+        for v, head, body in secs:
+            if v and v > mine:
+                continue                               # e.g. a newer entry in a source checkout
+            tag = "  ·  *this version*" if v == mine else ""
+            md.append(f"## {head}{tag}\n\n{body}\n")
+        if not md:
+            md = ["No release notes in this build."]
+        self.view.setMarkdown("\n".join(md))
+        self.view.verticalScrollBar().setValue(0)
 
 
 class ColumnsDialog(QDialog):
@@ -4883,12 +5099,16 @@ class Dashboard(QScrollArea):
             settings_btn = QPushButton("Card settings…")
             settings_btn.setObjectName("link")
             settings_btn.clicked.connect(lambda: self.win.card_settings(tab, card))
+            colors_btn = QPushButton("🎨 Colours…")
+            colors_btn.setObjectName("link")
+            colors_btn.setToolTip("This card's own colours, for everyone")
+            colors_btn.clicked.connect(lambda: self.win.edit_card_colors(tab, card))
             cancel = QPushButton("Cancel")
             cancel.clicked.connect(self.win.cancel_editing)
             done = QPushButton("Done editing")
             done.setObjectName("primary")
             done.clicked.connect(self.win.finish_editing)
-            for w in (settings_btn, cancel, done):
+            for w in (settings_btn, colors_btn, cancel, done):
                 head.addWidget(w)
         groups = layout.split_groups(tab, card)
         key = card_key(tab, card)
@@ -4987,6 +5207,10 @@ class Dashboard(QScrollArea):
         return frame
 
     def _card_body(self, lay_, tab, card, lo, ctx, target, editing=False):
+        with charts.card_colors(card.get("colors")):           # the card's own colours, if it has any
+            self._card_body_(lay_, tab, card, lo, ctx, target, editing)
+
+    def _card_body_(self, lay_, tab, card, lo, ctx, target, editing=False):
         drawn = []
         for b in card["blocks"]:
             if not b["dash"] and not editing:
@@ -5266,11 +5490,41 @@ class TrackerApp(QMainWindow):
         version_btn.setCursor(Qt.PointingHandCursor)
         version_btn.setToolTip("Check for updates")
         version_btn.clicked.connect(lambda: self._check_for_update(manual=True))
+        news_btn = QPushButton("What's new")
+        news_btn.setObjectName("link")
+        news_btn.setStyleSheet(f"color:{MUTED}; font-size:11px; margin-left:4px;")
+        news_btn.setCursor(Qt.PointingHandCursor)
+        news_btn.setToolTip("What changed in each version")
+        news_btn.clicked.connect(lambda: self.show_whats_new())
+        status_row.addWidget(news_btn)
         status_row.addWidget(version_btn)
         root.addLayout(status_row)
 
         QShortcut(QKeySequence("Ctrl+R"), self, lambda: self._sync(quiet=False))
         self._fill_releases()
+        QTimer.singleShot(1200, self._whats_new_after_update)
+
+    # ── what's new ────────────────────────────────────────────────────────────
+
+    def show_whats_new(self, since=None):
+        dlg = WhatsNewDialog(self, since)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        dlg.show()                                  # not modal: the app keeps working behind it
+        return dlg
+
+    def _whats_new_after_update(self):
+        """Opens What's new once, the first time a new version starts (not on a first install)."""
+        seen = self.cfg.get("seen_version")
+        if seen == APP_VERSION:
+            return
+        self.cfg["seen_version"] = APP_VERSION
+        store.save_config(self.cfg)
+        if not seen and self.cfg.get("sheets"):      # set up before versions were remembered (≤ 2.4.11)
+            older = [h for v, h, _ in _changelog_sections(_changelog_text())
+                     if v and v < _version_tuple(APP_VERSION)]
+            seen = older[0] if older else None
+        if seen and _version_tuple(APP_VERSION) > _version_tuple(seen):
+            self.show_whats_new(since=seen)
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
@@ -6033,6 +6287,30 @@ class TrackerApp(QMainWindow):
             store.save_config(self.cfg)
         self._redraw()
         self._save_settings(settings, f"Saved the {e['tab']} cards for everyone.")
+
+    def edit_card_colors(self, tab, card):
+        """✎ Edit → Colours…: the card's own colours, kept in the copy being edited (Done
+        editing saves them to the sheet for everyone)."""
+        others = {}                               # key → [(card title, colour)], other cards first found
+        for t in self.data.get("tabs", []):
+            try:
+                cards = self.layout_of(t)["cards"]
+            except Exception:
+                continue
+            for c in cards:
+                if c is card or (t["title"] == tab["title"] and c["id"] == card["id"]):
+                    continue
+                for key, color in (c.get("colors") or {}).items():
+                    others.setdefault(key, []).append((layout.card_title(t, c), color))
+        dlg = CardColorsDialog(self, tab, card, others)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        if dlg.colors:
+            card["colors"] = dlg.colors
+        else:
+            card.pop("colors", None)
+        self._redraw()
+        self._set_status("Card colours changed — Done editing saves them for everyone.")
 
     def card_settings(self, tab, card):
         e = self.editing

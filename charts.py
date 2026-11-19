@@ -8,7 +8,7 @@ Every mark shows a tooltip on hover and emits `picked` when clicked, which the
 app uses to jump to the matching rows in the table.
 """
 
-import html, math
+import contextlib, html, math
 from collections import Counter
 
 from PyQt5.QtWidgets import QWidget, QToolTip, QSizePolicy
@@ -85,6 +85,34 @@ def set_overrides(colors):
     OVERRIDES.update(colors or {})
 
 
+# A card's own colours (✎ Edit → Colours…), layered over OVERRIDES while that card draws.
+# Same keys as OVERRIDES. A card without any keeps the sheet-wide colours.
+CARD = {}
+_RECORD = None      # while set: {key: (label, section, colour without the card's own)} of what got coloured
+
+@contextlib.contextmanager
+def card_colors(colors, record=None):
+    """Draw with a card's colours; with `record` (a dict), also note every value coloured."""
+    global _RECORD
+    old, old_rec = dict(CARD), _RECORD
+    CARD.clear()
+    CARD.update(colors or {})
+    _RECORD = record
+    try:
+        yield
+    finally:
+        CARD.clear()
+        CARD.update(old)
+        _RECORD = old_rec
+
+def _override(key):
+    return CARD.get(key) or OVERRIDES.get(key)
+
+def _note(key, label, section, color):
+    if _RECORD is not None and key not in _RECORD:
+        _RECORD[key] = (label, section, color)
+
+
 # One color per subsystem and per category value, the same on every card, tab
 # and export. The order comes from the dropdown options across the whole sheet.
 SUBSYSTEM_ORDER = []          # e.g. ["CC", "Drawer", "Gantry", "HT", "IA"]
@@ -143,16 +171,18 @@ def _slot(order, value):
 
 def subsystem_color(name, use_overrides=True):
     key = f"{SUBSYSTEM_KEY}:{name.strip().lower()}"
-    if use_overrides and key in OVERRIDES:
-        return OVERRIDES[key]
-    return _slot(SUBSYSTEM_ORDER, name.strip())
+    color = (use_overrides and _override(key)) or _slot(SUBSYSTEM_ORDER, name.strip())
+    if use_overrides:
+        _note(key, name.strip(), "Subsystems", color)
+    return color
 
 def category_color(column, value, use_overrides=True):
     col = column.strip().lower()
     key = f"{col}:{value.strip().lower()}"
-    if use_overrides and key in OVERRIDES:
-        return OVERRIDES[key]
-    return _slot(CATEGORY_ORDER.setdefault(col, []), value.strip())
+    color = (use_overrides and _override(key)) or _slot(CATEGORY_ORDER.setdefault(col, []), value.strip())
+    if use_overrides:
+        _note(key, value.strip(), column.strip(), color)
+    return color
 
 
 def status_colors(values, options=(), use_overrides=True):
@@ -164,8 +194,8 @@ def status_colors(values, options=(), use_overrides=True):
     ordered = list(options) + sorted(set(values) - set(options))
     for v in ordered:
         low = (v or "").strip().lower()
-        if use_overrides and low in OVERRIDES:
-            colors[v] = OVERRIDES[low]
+        if use_overrides and _override(low):
+            colors[v] = _override(low)
         elif not low:
             colors[v] = PENDING
         else:
@@ -176,6 +206,9 @@ def status_colors(values, options=(), use_overrides=True):
     free = [c for c in CATEGORICAL if c.upper() not in taken] or CATEGORICAL
     for i, v in enumerate(unknown):
         colors[v] = free[i % len(free)]
+    if use_overrides and _RECORD is not None:
+        for v in values:
+            _note((v or "").strip().lower(), (v or "").strip() or "No status", "Statuses", colors.get(v))
     return colors
 
 
