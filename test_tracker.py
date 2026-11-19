@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.4.13"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.4.14"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -220,6 +220,31 @@ _colors_for = charts.tab_colors
 
 def _settings(win):
     return (win.data or {}).get("settings") or {}
+
+
+def _card_merger(tab, base, edited, edited_raw):
+    """fn(the layout in the sheet now) → the layout to save: the cards you changed, added or
+    deleted, on top of the sheet's current cards. Another admin may have saved other cards of
+    the same tab while you were editing; theirs stay."""
+    def card_json(c):
+        return json.dumps(c, sort_keys=True)
+    before = layout.layout_for(tab, base)
+    def merge(now_raw):
+        if not now_raw:
+            return edited_raw
+        now = layout.layout_for(tab, {layout.key_for(tab): now_raw})
+        if [card_json(c) for c in now["cards"]] == [card_json(c) for c in before["cards"]]:
+            return edited_raw                          # nobody else changed this tab: save as is
+        b = {c["id"]: card_json(c) for c in before["cards"]}
+        mine = {c["id"]: c for c in edited["cards"]}
+        changed = {i for i, c in mine.items() if b.get(i) != card_json(c)}
+        deleted = set(b) - set(mine)
+        cards = [mine[c["id"]] if c["id"] in changed else c for c in now["cards"] if c["id"] not in deleted]
+        have = {c["id"] for c in cards}
+        cards += [c for i, c in mine.items() if i in changed and i not in have]   # cards you added
+        out = dict(edited, cards=cards)
+        return layout.dump(out)
+    return merge
 
 
 # ── background work ───────────────────────────────────────────────────────────
@@ -4287,7 +4312,7 @@ class ChangeLogPage(QWidget):
         unlocked = self.win._admin_unlock(self, "change logs")
         if not unlocked:
             return
-        settings = unlocked[0]
+        settings, base = unlocked[0], self.win._settings_base   # it saves later, after generating
 
         def work():
             return changelog.generate(a, b, progress=lambda m: setattr(self, "_progress", m))
@@ -4298,7 +4323,7 @@ class ChangeLogPage(QWidget):
             self.log = log
             self.win._save_settings(changelog.save(settings, log),
                                     f"Change log {a} → {b} saved for everyone "
-                                    f"({len(log['entries'])} PRs, {log['commits']} commits).")
+                                    f"({len(log['entries'])} PRs, {log['commits']} commits).", base=base)
 
         def failed(exc):
             self.timer.stop()
@@ -6164,12 +6189,15 @@ class TrackerApp(QMainWindow):
         self.set_view(v["id"])
         self.view_settings()
 
-    def _save_view(self, view, settings=None, msg=None):
+    def _save_view(self, view, settings=None, msg=None, base=None):
         """Shared views go to the sheet (needs the unlocked admin settings); yours to this computer."""
         if view.get("shared"):
-            settings = dict(settings if settings is not None else _settings(self))
+            if settings is None:
+                settings = _settings(self)
+                base = dict(settings)
+            settings = dict(settings)
             settings[views.PREFIX + view["id"]] = views.dump(view)
-            self._save_settings(settings, msg or f"Saved the shared view “{view['name']}” for everyone.")
+            self._save_settings(settings, msg or f"Saved the shared view “{view['name']}” for everyone.", base=base)
         else:
             mine = views.private(self.cfg, self.url)
             i = next((k for k, v in enumerate(mine) if v["id"] == view["id"]), None)
@@ -6283,7 +6311,8 @@ class TrackerApp(QMainWindow):
                 settings, stored = unlocked
             self.editing = {"tab": tab["title"], "card": card_id, "view": view["id"],
                             "view_obj": views.copy_view(view), "shared": view["shared"],
-                            "settings": settings, "stored": stored}
+                            "settings": settings, "stored": stored,
+                            "base": getattr(self, "_settings_base", None)}
             self._redraw()
             self._set_status("Editing a card of “" + view["name"] + "” — Done editing saves it"
                              + (" for everyone." if view["shared"] else "."))
@@ -6295,7 +6324,7 @@ class TrackerApp(QMainWindow):
         lo = layout.copy_layout(layout.layout_for(tab, settings))
         card = next((c for c in lo["cards"] if c["id"] == card_id), lo["cards"][0])
         self.editing = {"tab": tab["title"], "card": card["id"], "layout": lo,
-                        "settings": settings, "stored": stored}
+                        "settings": settings, "stored": stored, "base": self._settings_base}
         self.dashboard.set_data(self.data)
         self._set_status(f"Editing {layout.card_title(tab, card)} — Done editing saves it for everyone.")
         if add_column:
@@ -6321,7 +6350,7 @@ class TrackerApp(QMainWindow):
     def cancel_editing(self):
         e, self.editing = self.editing, None
         if e and e.get("settings") and e["settings"].get(store.PASSCODE_KEY) != e["stored"]:
-            self._save_settings(e["settings"], "Admin passcode set.")
+            self._save_settings(e["settings"], "Admin passcode set.", base=e.get("base"))
         self._redraw()
         self._set_status("Changes thrown away.")
 
@@ -6332,7 +6361,7 @@ class TrackerApp(QMainWindow):
         if e.get("view"):
             vo = e["view_obj"]
             vo["shared"] = e["shared"]
-            self._save_view(vo, e["settings"])
+            self._save_view(vo, e["settings"], base=e.get("base"))
             return
         tab = self._tab(e["tab"])
         settings = dict(e["settings"])
@@ -6347,7 +6376,11 @@ class TrackerApp(QMainWindow):
             known += [c["name"].strip() for c in tab["columns"] if c["name"].strip() not in known]
             store.save_config(self.cfg)
         self._redraw()
-        self._save_settings(settings, f"Saved the {e['tab']} cards for everyone.")
+        merge = None
+        if tab and not e.get("reset") and e.get("base") is not None:
+            merge = {key: _card_merger(tab, e["base"], e["layout"], settings[key])}
+        self._save_settings(settings, f"Saved the {e['tab']} cards for everyone.", base=e.get("base"),
+                            merge=merge)
 
     def edit_card_colors(self, tab, card):
         """✎ Edit → Colours…: the card's own colours, kept in the copy being edited (Done
@@ -6509,6 +6542,7 @@ class TrackerApp(QMainWindow):
                                     "Connect to the Google Sheet first, then try again.")
             return None
         settings = dict(self.data.get("settings") or {})
+        self._settings_base = dict(settings)       # what this change starts from (see _save_settings)
         stored = settings.get(store.PASSCODE_KEY)
         if not stored:
             dlg = NewPasscodeDialog(parent)
@@ -6558,14 +6592,30 @@ class TrackerApp(QMainWindow):
             return
         self._save_settings(dlg.result_settings(), "Filters saved for everyone.")
 
-    def _save_settings(self, settings, msg):
+    def _save_settings(self, settings, msg, base=None, merge=None):
+        """Save shared settings. Only what changed from `base` (the copy this change started
+        from: by default the one taken at the admin passcode) is written, on top of the
+        sheet as it is now. So two admins changing different things — cards, colours, views —
+        no longer undo each other's work: before, the whole copy was written back, putting
+        back anything another admin had changed since this app's last sync."""
+        if base is None:
+            base = getattr(self, "_settings_base", None)
+        if base is None:
+            base = (self.data or {}).get("settings") or {}
+        changes = {k: settings.get(k) for k in set(base) | set(settings) if settings.get(k) != base.get(k)}
+        for k, fn in (merge or {}).items():       # keys that merge with the sheet's value instead
+            if k in changes:
+                changes[k] = fn
         src = self.source
-        def saved(_):
-            self.data["settings"] = settings
+        def saved(merged):
+            self.data["settings"] = merged
             self._show_data(self.data)
             store.save_cache(self.url, self.data)
-            self._set_status(msg)
-        self._run(lambda: src.save_settings(settings), saved, busy_msg="Saving settings…")
+            self._set_status(msg if changes else "Nothing to save.")
+        if not changes:
+            self._set_status("Nothing changed.")
+            return
+        self._run(lambda: src.update_settings(changes), saved, busy_msg="Saving settings…")
 
     # ── updates ───────────────────────────────────────────────────────────────
 

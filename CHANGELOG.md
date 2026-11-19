@@ -1,5 +1,8 @@
 # What's new
 
+## 2.4.14
+- **Admins no longer undo each other's changes.** Saving cards, colours, views, filters or change logs used to write back this app's whole copy of the shared settings, which put back anything another admin had changed since your last sync (e.g. you save a colour and their card edits vanish). Now only what you changed is saved, on top of the sheet as it is at that moment. Two admins editing different cards of the same tab at the same time both keep their changes too.
+
 ## 2.4.13
 - **Export sections list fixed.** No more sideways scroll bar: each section's chart ticks wrap to fit the window. And the list no longer shows a second, stale copy of itself behind it after you change something.
 

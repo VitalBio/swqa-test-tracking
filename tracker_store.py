@@ -869,6 +869,26 @@ class SheetSource:
         except Exception as exc:
             raise _locked(exc, TESTING_TAB) from exc
 
+    def update_settings(self, changes):
+        """Apply just these changes ({key: value, None to remove, or fn(value now) → value}) to the settings tab as
+        it is in the sheet right now, and return the result. Other admins' changes made
+        since this app last synced are kept: only the keys you changed are written."""
+        import gspread
+        try:
+            rows = self.book.worksheet(SETTINGS_TAB).get_all_values()
+        except gspread.WorksheetNotFound:
+            rows = []
+        live = {r[0].strip(): (r[1] if len(r) > 1 else "") for r in rows[1:] if r and r[0].strip()}
+        for k, v in changes.items():
+            if callable(v):                        # merge with what's there now (e.g. one card of a layout)
+                v = v(live.get(k))
+            if v is None:
+                live.pop(k, None)
+            else:
+                live[k] = v
+        self.save_settings(live)
+        return live
+
     def save_settings(self, settings):
         """Write the shared settings to the hidden settings tab (made on first use)."""
         import gspread
