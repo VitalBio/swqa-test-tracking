@@ -466,7 +466,7 @@ class Painter(es.Renderer):
         tab, card = es.find_card(self.data, sid)
         if card is None:
             return None
-        k, ctx = self.k, self.ctx
+        k, ctx = self.k, blocks.card_ctx(self.ctx, tab, card)     # its own dates and filters, if any
         wanted = self.cfg["opts"].get(sid, {})
         chosen = [b for b in card["blocks"] if b.get("dash", True) and wanted.get(b["id"], True)]
         groups = [(n, test) for n, test in (lay.split_groups(tab, card) or []) if es.chosen(self.cfg, n)]
@@ -503,7 +503,10 @@ class Painter(es.Renderer):
                 body += [build(width) for build in wide]
         if not body:
             return None
-        return lay.card_title(tab, card), blocks.card_note(card, [tab], ctx), vstack(body, 22)
+        note = blocks.card_note(card, [tab], ctx)
+        if blocks.own_of(card):
+            note = " · ".join([note] + blocks.own_note(blocks.own_of(card)))
+        return lay.card_title(tab, card), note, vstack(body, 22)
 
     def _part(self, part, width, title):
         """A dashboard Part → ("donut" | "wide", builder(width) → Item), in this design."""

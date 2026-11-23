@@ -8,7 +8,7 @@ A block can be drawn from several tabs at once (the export's combined Error
 Analysis for VitalOne + Viking): counts are summed and columns matched by name.
 """
 
-import html, re
+import html, json, re
 from collections import Counter, defaultdict
 from datetime import date, datetime
 
@@ -34,12 +34,14 @@ class Ctx:
         self.sheet_url = sheet_url                 # for links to cells in the export
         self.settings = settings or {}
         self.row_filter = None                     # a split card's section: which rows it shows
+        self.own = None                            # a card's own dates and filters, when it has them
 
     def section(self, test):
-        """A copy of this context that only sees the rows passing `test`."""
+        """A copy of this context that only sees the rows passing `test` (as well as any
+        filter it already has, e.g. a card's own)."""
         import copy
         c = copy.copy(self)
-        c.row_filter = test
+        c.row_filter = _both(self.row_filter, test)
         return c
 
     def all_rows(self, tab):
@@ -55,6 +57,145 @@ class Ctx:
             return rows
         dcol = store.date_column(tab)
         return [r for r in rows if store.in_range(r["values"][dcol["pos"]], self.rng)]
+
+
+# ── a card's own dates and filters (✎ Edit → 📅 Dates & filters…) ─────────────────
+# card["own"] = {"on": True,
+#                "dates": {"mode": "follow" | "all" | "days" | "since" | "between",
+#                          "days": 7, "from": "2026-11-01", "to": "2026-11-23"},
+#                "filters": [[column, op, value], …],     # op: chartquery.OPS + "is one of"
+#                "latest": column or ""}                   # only the newest row per value of it
+# Off (or missing): the card follows the dashboard, as before.
+
+_MIN_DAY = date(1900, 1, 1)
+OWN_OPS = [("is", "is"), ("is not", "is not"), ("is one of", "is one of"),
+           ("contains", "contains"), ("is empty", "is empty"), ("is not empty", "is not empty")]
+_filter_cache, _and_cache = {}, {}
+
+def own_of(card):
+    own = card.get("own") or {}
+    return own if own.get("on") else None
+
+def own_range(own, ctx):
+    """(rng, text) for a card's own dates; the dashboard's when it follows them."""
+    from datetime import date as _d, timedelta
+    d = own.get("dates") or {}
+    mode, today = d.get("mode", "follow"), _d.today()
+    def day(key):
+        try:
+            return _d.fromisoformat(d.get(key) or "")
+        except ValueError:
+            return None
+    fmt = lambda x: f"{x:%b} {x.day}"
+    if mode == "all":
+        return None, "All dates"
+    if mode == "days":
+        n = max(1, int(d.get("days") or 7))
+        start = today - timedelta(days=n - 1)
+        return (start, today), f"Last {n} day{'s' if n != 1 else ''} ({fmt(start)} – {fmt(today)})"
+    if mode == "since" and day("from"):
+        return (day("from"), today), f"Since {fmt(day('from'))}"
+    if mode == "between" and day("from") and day("to"):
+        a, b = sorted((day("from"), day("to")))
+        return (a, b), f"{fmt(a)} – {fmt(b)}"
+    return ctx.rng, ctx.range_text
+
+def own_column(tab, name):
+    """A column by header name, including the app's own Status (a run's overall status)."""
+    col = lay.find_column(tab, name)
+    if col is None and name:
+        col = next((c for c in store.derived_columns(tab).values()
+                    if c["name"].strip().lower() == name.strip().lower()), None)
+    return col
+
+def own_matches(value, op, want):
+    v, w = (value or "").strip().lower(), (want or "").strip().lower()
+    if op == "is":
+        return v == w
+    if op == "is not":
+        return v != w
+    if op == "is one of":
+        return v in {x.strip() for x in w.split(",") if x.strip()}
+    if op == "contains":
+        return w in v
+    if op == "is empty":
+        return not v
+    if op == "is not empty":
+        return bool(v)
+    return True
+
+def card_filter(data, tab, own, rng):
+    """A row test for a card's filters and "latest row per": rows of the tabs that have the
+    column are checked; other tabs' rows pass. Kept per data/settings so the SQL cache works."""
+    filters = [f for f in (own.get("filters") or []) if f and f[0]]
+    latest = (own.get("latest") or "").strip()
+    if not filters and not latest:
+        return None
+    key = (id(data), (data or {}).get("fetched_at"), json.dumps([filters, latest, tab["title"]]), rng)
+    if key in _filter_cache:
+        return _filter_cache[key][1]
+    tabs = (data or {}).get("tabs", []) if lay.is_custom(tab) else [tab]
+    keep_out = set()
+    for t in tabs:
+        rows = [r for r in t["rows"] if not store.is_blank(r)]
+        for name, op, want in filters:
+            col = own_column(t, name)
+            if col is None:
+                continue
+            for r in rows:
+                if not own_matches(store.value_of(t, r, col), op, want):
+                    keep_out.add(id(r))
+        col = own_column(t, latest) if latest else None
+        if col is not None:                    # newest row per value: by the date column, else sheet order
+            dcol = store.date_column(t)
+            newest = {}
+            for i, r in enumerate(rows):
+                if id(r) in keep_out:
+                    continue
+                if rng is not None and dcol is not None and not store.in_range(r["values"][dcol["pos"]], rng):
+                    continue
+                k = store.value_of(t, r, col).strip().lower()
+                when = (store.parse_date(r["values"][dcol["pos"]]) if dcol else None, i)
+                if k not in newest or (when[0] or _MIN_DAY, i) >= (newest[k][0][0] or _MIN_DAY, newest[k][0][1]):
+                    newest[k] = (when, r)
+            winners = {id(r) for _, r in newest.values()}
+            keep_out |= {id(r) for r in rows if id(r) not in winners}
+    test = lambda r, out=keep_out: id(r) not in out
+    if len(_filter_cache) > 50:
+        _filter_cache.clear()
+    _filter_cache[key] = (keep_out, test)
+    return test
+
+def _both(a, b):
+    if not a or not b:
+        return a or b
+    k = (id(a), id(b))
+    if k not in _and_cache:
+        if len(_and_cache) > 50:
+            _and_cache.clear()
+        _and_cache[k] = (a, b, lambda r: a(r) and b(r))   # keeps a and b alive, so ids stay unique
+    return _and_cache[k][2]
+
+def card_ctx(ctx, tab, card):
+    """The context a card's charts draw in: its own dates and filters when it has them."""
+    own = own_of(card)
+    if not own:
+        return ctx
+    import copy
+    c = copy.copy(ctx)
+    c.rng, c.range_text = own_range(own, ctx)
+    c.own = own
+    c.row_filter = _both(ctx.row_filter, card_filter(ctx.data, tab, own, c.rng))
+    return c
+
+def own_note(own):
+    """“Own dates: last 7 days · Module is CC · latest per Test Case” — next to the title."""
+    bits = []
+    for name, op, want in [f for f in (own.get("filters") or []) if f and f[0]]:
+        bits.append(f"{name} {op}" + (f" {want}" if op not in ("is empty", "is not empty") else ""))
+    if own.get("latest"):
+        bits.append(f"latest per {own['latest']}")
+    return bits
 
 
 class Part:

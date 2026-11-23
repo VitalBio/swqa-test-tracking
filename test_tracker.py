@@ -19,7 +19,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
 
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLayout, QSpinBox,
     QLabel, QLineEdit, QPushButton, QTableView, QHeaderView, QMessageBox, QFrame,
     QDialog, QFormLayout, QDialogButtonBox, QFileDialog, QShortcut, QComboBox,
     QCheckBox, QTabWidget, QScrollArea, QStyledItemDelegate, QDateEdit, QMenu,
@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.5.0"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.5.1"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -848,6 +848,178 @@ class WhatsNewDialog(QDialog):
             md = ["No release notes in this build."]
         self.view.setMarkdown("\n".join(md))
         self.view.verticalScrollBar().setValue(0)
+
+
+class CardScopeDialog(QDialog):
+    """✎ Edit → 📅 Dates & filters…: a card's own dates and filters, instead of the dashboard's.
+    Off by default; turned on, every chart on the card uses them (saved with Done editing)."""
+
+    DATES = [("follow", "Follow the dashboard's dates"), ("all", "All dates"),
+             ("days", "The last … days"), ("since", "Since a date"), ("between", "Between two dates")]
+
+    def __init__(self, win, tab, card):
+        super().__init__(win)
+        self.setWindowTitle(f"Dates & filters · {layout.card_title(tab, card)}")
+        self.setMinimumWidth(620)
+        self.tab, self.win = tab, win
+        own = dict(card.get("own") or {})
+        tabs = win.data["tabs"] if layout.is_custom(tab) else [tab]
+        self.tabs = tabs
+        names = []
+        for t in tabs:
+            derived = store.derived_columns(t).get(store.STATUS)
+            for c in ([derived] if derived else []) + list(t["columns"]):
+                n = c["name"].strip()
+                if n and n not in names:
+                    names.append(n)
+        self.names = names
+
+        self.on = QCheckBox("Use this card's own dates and filters (instead of the dashboard's)")
+        self.on.setStyleSheet("font-weight:bold;")
+        self.on.setChecked(bool(own.get("on")))
+        d = own.get("dates") or {}
+        self.mode = QComboBox()
+        for k, label in self.DATES:
+            self.mode.addItem(label, k)
+        self.mode.setCurrentIndex(max(self.mode.findData(d.get("mode", "days")), 0))
+        self.days = QSpinBox()
+        self.days.setRange(1, 3650)
+        self.days.setValue(int(d.get("days") or 7))
+        self.days.setSuffix(" days")
+        today = QDate.currentDate()
+        def qdate(text, fallback):
+            q = QDate.fromString(text or "", "yyyy-MM-dd")
+            return q if q.isValid() else fallback
+        self.d_from = QDateEdit(qdate(d.get("from"), today.addDays(-6)))
+        self.d_to = QDateEdit(qdate(d.get("to"), today))
+        for ed in (self.d_from, self.d_to):
+            ed.setCalendarPopup(True)
+            ed.setDisplayFormat("MMM d, yyyy")
+        self.and_lbl = QLabel("and")
+        date_row = QHBoxLayout()
+        for w_ in (self.mode, self.days, self.d_from, self.and_lbl, self.d_to):
+            date_row.addWidget(w_)
+        date_row.addStretch(1)
+        self.mode.currentIndexChanged.connect(self._modes)
+
+        self.filters_box = QVBoxLayout()
+        self.filters_box.setSpacing(4)
+        add = QPushButton("+ Add filter")
+        add.setObjectName("link")
+        add.clicked.connect(lambda: self._add_filter())
+        self.latest = QComboBox()
+        self.latest.addItem("All rows", "")
+        for n in names:
+            self.latest.addItem(f"Only the newest row per {n}", n)
+        self.latest.setCurrentIndex(max(self.latest.findData(own.get("latest") or ""), 0))
+        self.latest.setToolTip("When a test is run again (e.g. after a fix), only its newest row counts, "
+                               "so the card shows where each test stands now")
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.addRow("Dates", date_row)
+        fl = QVBoxLayout()
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.addLayout(self.filters_box)
+        fl.addWidget(add, 0, Qt.AlignLeft)
+        form.addRow("Filters", fl)
+        form.addRow("Rows", self.latest)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.body = QWidget()
+        self.body.setLayout(form)
+        self.on.toggled.connect(self.body.setEnabled)
+        self.body.setEnabled(self.on.isChecked())
+        note = _small_label("Every chart on this card uses these, on the dashboard and in exports, for "
+                            "everyone (saved with Done editing). A note next to the card's title says so. "
+                            + ("Filters apply to the tabs that have that column." if layout.is_custom(tab)
+                               else ""), MUTED)
+        note.setWordWrap(True)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Apply to card")
+        buttons.button(QDialogButtonBox.Ok).setObjectName("primary")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.addWidget(self.on)
+        root.addWidget(self.body)
+        root.addWidget(note)
+        root.addWidget(buttons)
+        for f in own.get("filters") or []:
+            if f and f[0]:
+                self._add_filter(*(list(f) + ["", ""])[:3])
+        self._modes()
+
+    def _modes(self, *_):
+        m = self.mode.currentData()
+        self.days.setVisible(m == "days")
+        self.d_from.setVisible(m in ("since", "between"))
+        self.and_lbl.setVisible(m == "between")
+        self.d_to.setVisible(m == "between")
+
+    def _values(self, name):
+        out = []
+        for t in self.tabs:
+            col = blocks.own_column(t, name)
+            if col is None:
+                continue
+            for r in _visible_rows(t):
+                v = store.value_of(t, r, col).strip()
+                if v and v not in out:
+                    out.append(v)
+        return sorted(out, key=str.lower)[:300]
+
+    def _add_filter(self, name=None, op="is", value=""):
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        c = QComboBox()
+        for n in self.names:
+            c.addItem(n, n)
+        c.setCurrentIndex(max(c.findData(name), 0))
+        o = QComboBox()
+        for k, label in blocks.OWN_OPS:
+            o.addItem(label, k)
+        o.setCurrentIndex(max(o.findData(op), 0))
+        v = QComboBox()
+        v.setEditable(True)
+        v.setMinimumWidth(160)
+        def fill(*_):
+            keep = v.currentText()
+            v.clear()
+            v.addItems(self._values(c.currentData()))
+            v.setCurrentText(keep or value)
+        fill()
+        c.currentIndexChanged.connect(lambda *_: (v.setCurrentText(""), fill()))
+        o.currentIndexChanged.connect(lambda *_: v.setVisible(o.currentData() not in ("is empty", "is not empty")))
+        v.setVisible(op not in ("is empty", "is not empty"))
+        x = QToolButton()
+        x.setText("✕")
+        x.setToolTip("Remove this filter")
+        x.clicked.connect(lambda: (row.hide(), row.setParent(None), row.deleteLater()))
+        for w_ in (c, o, v, x):
+            h.addWidget(w_, 1 if w_ is v else 0)
+        row.parts = (c, o, v)
+        self.filters_box.addWidget(row)
+
+    def result(self):
+        filters = []
+        for i in range(self.filters_box.count()):
+            row = self.filters_box.itemAt(i).widget()
+            if row is None or not hasattr(row, "parts"):
+                continue
+            c, o, v = row.parts
+            filters.append([c.currentData(), o.currentData(), v.currentText().strip()])
+        m = self.mode.currentData()
+        dates = {"mode": m}
+        if m == "days":
+            dates["days"] = self.days.value()
+        if m in ("since", "between"):
+            dates["from"] = self.d_from.date().toString("yyyy-MM-dd")
+        if m == "between":
+            dates["to"] = self.d_to.date().toString("yyyy-MM-dd")
+        return {"on": self.on.isChecked(), "dates": dates, "filters": filters,
+                "latest": self.latest.currentData() or ""}
 
 
 class ColumnsDialog(QDialog):
@@ -5031,8 +5203,8 @@ class Dashboard(QScrollArea):
         """Leave out a card with nothing to show in the dates: a run tab's cards when it has no
         runs (one line at the top says so), and an Error Analysis with no errors — it stays
         while an earlier error is still unresolved. "show" brings them back; never while editing."""
-        if self.show_empty or self.is_editing(tab, card):
-            return False
+        if self.show_empty or self.is_editing(tab, card) or blocks.own_of(card):
+            return False                       # (a card with its own dates isn't about the dashboard's)
         ctx = blocks.Ctx(self.range, self.range_text, export=False, settings=_settings(self.win),
                          data=self.win.data)
         empty = card["id"] == "analysis" and self._draws_nothing(tab, card, ctx)
@@ -5196,6 +5368,7 @@ class Dashboard(QScrollArea):
         edited (✎ Edit), each chart is a tile you can drag, resize, and change."""
         ctx = blocks.Ctx(self.range, self.range_text, export=False, settings=_settings(self.win),
                          data=self.win.data)
+        ctx = blocks.card_ctx(ctx, tab, card)           # its own dates and filters, if it has them
         editing = not preview and self.is_editing(tab, card)
         frame = QFrame()
         frame.setObjectName("card_edit" if editing else "card")
@@ -5207,11 +5380,22 @@ class Dashboard(QScrollArea):
         t.setStyleSheet("font-size:15px; font-weight:bold;")
         head.addWidget(t)
         head.addWidget(_small_label(blocks.card_note(card, [tab], ctx), MUTED), 0, Qt.AlignBottom)
+        own = blocks.own_of(card)
+        if own:                                         # say so: it isn't following the dashboard's dates
+            pill = QLabel("📅 " + (" · ".join(blocks.own_note(own)) or "Own dates"))
+            pill.setStyleSheet("font-size:11px; color:#0F6E56; background:#E1F5EE; border-radius:8px; padding:2px 8px;")
+            pill.setToolTip(f"This card uses its own dates ({ctx.range_text}) and filters, not the "
+                            "dashboard's (✎ Edit → 📅 Dates & filters…)")
+            head.addWidget(pill, 0, Qt.AlignBottom)
         head.addStretch(1)
         if editing:
             settings_btn = QPushButton("Card settings…")
             settings_btn.setObjectName("link")
             settings_btn.clicked.connect(lambda: self.win.card_settings(tab, card))
+            scope_btn = QPushButton("📅 Dates & filters…")
+            scope_btn.setObjectName("link")
+            scope_btn.setToolTip("Give this card its own dates and filters, instead of the dashboard's")
+            scope_btn.clicked.connect(lambda: QTimer.singleShot(0, lambda: self.win.edit_card_scope(tab, card)))
             colors_btn = QPushButton("🎨 Colours…")
             colors_btn.setObjectName("link")
             colors_btn.setToolTip("This card's own colours, for everyone")
@@ -5221,7 +5405,7 @@ class Dashboard(QScrollArea):
             done = QPushButton("Done editing")
             done.setObjectName("primary")
             done.clicked.connect(self.win.finish_editing)
-            for w in (settings_btn, colors_btn, cancel, done):
+            for w in (settings_btn, scope_btn, colors_btn, cancel, done):
                 head.addWidget(w)
         groups = layout.split_groups(tab, card)
         key = card_key(tab, card)
@@ -6442,6 +6626,17 @@ class TrackerApp(QMainWindow):
         self._redraw()
         self._set_status(f"New card “{card['title']}” — add charts, then Done editing saves it for everyone.")
         QTimer.singleShot(0, lambda: self.add_chart(tab, card))
+
+    def edit_card_scope(self, tab, card):
+        """✎ Edit → 📅 Dates & filters…: kept in the copy being edited (Done editing saves it)."""
+        dlg = CardScopeDialog(self, tab, card)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        own = dlg.result()
+        if own["on"] or card.get("own"):
+            card["own"] = own
+        self._redraw()
+        self._set_status("Card dates & filters changed — Done editing saves them for everyone.")
 
     def edit_card_colors(self, tab, card):
         """✎ Edit → Colours…: the card's own colours, kept in the copy being edited (Done

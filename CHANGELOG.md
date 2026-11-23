@@ -1,5 +1,8 @@
 # What's new
 
+## 2.5.1
+- **A card's own dates and filters.** ✎ Edit → *📅 Dates & filters…* and tick *Use this card's own dates and filters*. Pick its dates (all dates, the last N days, since a date, or between two dates), add filters (e.g. Module is CC, Build is one of v4.20.3, v4.20.4), and optionally *Only the newest row per …* (e.g. per Test), so a test that was re-run after a fix counts only its latest result. Every chart on the card uses them, on the dashboard and in exports, for everyone; a green note next to the title says so. Cards without it follow the dashboard as before.
+
 ## 2.5.0
 - **Custom cards.** *+ New card* (top of the dashboard, next to Show ▾) makes a card that isn't tied to one tab. Give it a title and add any charts: the Add chart form can count any tab (Simple), or write your own SQL across tabs. Custom cards come after the sheet's cards, are edited, coloured and hidden like any other card, are saved for everyone (admin passcode), and are in the export ticked. All existing cards stay as they are.
 

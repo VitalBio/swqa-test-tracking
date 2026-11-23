@@ -397,12 +397,15 @@ class Snapshot:
 
         title = combined_title(card, tabs)
         short = blocks.short_name(title).replace(" — ", " · ")
-        note = blocks.card_note(card, tabs, self.ctx)
+        cctx = blocks.card_ctx(self.ctx, tabs[0], card)        # its own dates and filters, if any
+        note = blocks.card_note(card, tabs, cctx)
+        if blocks.own_of(card):
+            note = " · ".join([note] + blocks.own_note(blocks.own_of(card)))
         out = [f'<p style="margin:0 0 4px 0"><b style="font-size:16px; color:{INK}">{esc(title)}</b>'
                f'&nbsp;&nbsp;<span style="font-size:12px; color:{MUTED}">{esc(note)}</span></p>']
         groups = lay.split_groups(tabs[0], card) if len(tabs) == 1 else None
-        sections = [(None, self.ctx)] if not groups else \
-            [(name, self.ctx.section(test)) for name, test in groups]
+        sections = [(None, cctx)] if not groups else \
+            [(name, cctx.section(test)) for name, test in groups]
         for section, ctx in sections:
             if section:                                  # labelled sections, same card
                 n = len(ctx.all_rows(tabs[0]))
