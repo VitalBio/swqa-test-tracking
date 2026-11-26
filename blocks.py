@@ -643,6 +643,11 @@ def _bug_summary(b, tabs, ctx):
     return [Part(title, box, pick, wide=True)]
 
 
+def _breakable(text, every=12):
+    """Very long words (e.g. "EdgeConnectivityModal") with invisible break points, so a
+    narrow column can wrap them instead of being pushed wider than its space."""
+    return re.sub(r"(\S{%d})(?=\S{3})" % every, "\\1\u200b", text)
+
 def _bug_list(b, tabs, ctx):
     tab = tabs[0]
     bugs = _Bugs(tab, ctx)
@@ -690,8 +695,8 @@ def _bug_list(b, tabs, ctx):
         summ = bugs.val(r, bugs.summary_col)
         summ = summ if len(summ) <= 36 else summ[:34].rstrip() + "…"
         rows_html.append(f'<tr><td style="padding:3px 10px 3px 0; white-space:nowrap">{bugs.link(r)}</td>'
-                         f'<td style="padding:3px 10px 3px 0; color:#1A1A18; white-space:nowrap">{esc(summ)}</td>'
-                         f'<td style="padding:3px 0; color:#8A8984; white-space:nowrap">{esc(extra(r))}</td></tr>')
+                         f'<td style="padding:3px 10px 3px 0; color:#1A1A18">{esc(_breakable(summ))}</td>'
+                         f'<td style="padding:3px 0; color:#8A8984">{esc(extra(r))}</td></tr>')
     more = (f'<br><a href="pick:all" style="color:{LINK}">and {len(items) - limit} more</a>'
             if len(items) > limit else "")
     body = (f'<table cellspacing="0">{"".join(rows_html)}</table>{more}' if items

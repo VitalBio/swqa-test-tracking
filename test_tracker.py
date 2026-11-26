@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.5.2"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.5.3"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -3883,7 +3883,10 @@ def range_text(rng):
 
 
 class _FlowColumns(QWidget):
-    """Puts its widgets side by side when there's room, otherwise one under another."""
+    """Puts its widgets side by side, as many to a row as get a readable width (MIN_W each),
+    in equal columns; the rest wrap to the next row. (It used to be all in one row only if
+    every one fitted at full width, else all in one column.)"""
+    MIN_W = 260
 
     def __init__(self):
         super().__init__()
@@ -3902,16 +3905,20 @@ class _FlowColumns(QWidget):
         return sum(w.sizeHint().width() for w in self.items) + 24 * (len(self.items) - 1)
 
     def _place(self):
-        cols = len(self.items) if self.width() >= self._needed() or not self.width() else 1
+        n = len(self.items)
+        if not self.width() or self.width() >= self._needed():
+            cols = n
+        else:
+            cols = max(1, min(n, (self.width() + 24) // (self.MIN_W + 24)))
         if cols == self.cols and all(self.grid.indexOf(w) >= 0 for w in self.items):
             return
         self.cols = cols
         for w in self.items:
             self.grid.removeWidget(w)
         for i, w in enumerate(self.items):
-            self.grid.addWidget(w, 0 if cols > 1 else i, i if cols > 1 else 0, Qt.AlignTop)
-        for c, w in enumerate(self.items):          # wider content gets a wider column
-            self.grid.setColumnStretch(c, w.sizeHint().width() if cols > 1 else int(c == 0))
+            self.grid.addWidget(w, i // cols, i % cols, Qt.AlignTop)
+        for c in range(n):                            # equal columns, so the lists line up
+            self.grid.setColumnStretch(c, 1 if c < cols else 0)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

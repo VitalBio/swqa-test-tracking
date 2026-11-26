@@ -1,5 +1,8 @@
 # What's new
 
+## 2.5.3
+- **New / Closed / In QA side by side.** The bug lists on Bug Statuses (and other side-by-side lists) used to sit in a row only if all of them fitted at full width, otherwise they stacked in one column. Now they share the row in equal columns, wrapping long summaries when space is tight, and only move to a second row when a list would get less than ~260px.
+
 ## 2.5.2
 - **Change a card's own dates when exporting.** In Export, a card that has its own dates gets a *Dates* choice: keep the card's own (e.g. Since Nov 25), use the export's dates, or pick others (last N days, since, between). It only changes that export and is remembered for next time; the card itself stays as it is.
 - **Pies line up.** Cards with several rows of pies (e.g. VT1 Static IS Blood On Disc) now lay them out in equal columns with every ring the same size and position, so an empty pie or a short legend no longer shifts the next one. Legend labels also get more room before being shortened.
