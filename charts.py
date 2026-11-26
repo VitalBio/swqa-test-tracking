@@ -380,7 +380,7 @@ class DonutChart(_Chart):
             p.setFont(_font(12, bold=hovered))
             count = f"{n}  ·  {round(100 * n / total)}%"
             cw = fm.horizontalAdvance(count) + 8
-            name = fm.elidedText(label or "No status", Qt.ElideRight, int(row.width() - cw - 30))
+            name = fm.elidedText(label or "No status", Qt.ElideRight, int(row.width() - cw - 22))
             p.drawText(QRectF(x0 + 18, y, row.width(), 24), Qt.AlignVCenter, name)
             p.setPen(QColor(INK2))
             p.setFont(_font(12))

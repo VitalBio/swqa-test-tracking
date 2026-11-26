@@ -466,6 +466,9 @@ class Painter(es.Renderer):
         tab, card = es.find_card(self.data, sid)
         if card is None:
             return None
+        override = (self.cfg.get("card_dates") or {}).get(sid)
+        if override and blocks.own_of(card):         # dates changed for this export only
+            card = dict(card, own=dict(card["own"], dates=override))
         k, ctx = self.k, blocks.card_ctx(self.ctx, tab, card)     # its own dates and filters, if any
         wanted = self.cfg["opts"].get(sid, {})
         chosen = [b for b in card["blocks"] if b.get("dash", True) and wanted.get(b["id"], True)]

@@ -141,6 +141,7 @@ def normalized(cfg, data=None):
     for sid, opts in (cfg.get("opts") or {}).items():
         if sid in known:
             base["opts"].setdefault(sid, {}).update({k: bool(v) for k, v in opts.items()})
+    base["card_dates"] = {k: v for k, v in (cfg.get("card_dates") or {}).items() if k in known and v}
     base["products"] = dict(cfg.get("products") or {})
     base["split"] = cfg.get("split", True)
     return base

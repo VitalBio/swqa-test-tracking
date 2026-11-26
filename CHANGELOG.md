@@ -1,5 +1,9 @@
 # What's new
 
+## 2.5.2
+- **Change a card's own dates when exporting.** In Export, a card that has its own dates gets a *Dates* choice: keep the card's own (e.g. Since Nov 25), use the export's dates, or pick others (last N days, since, between). It only changes that export and is remembered for next time; the card itself stays as it is.
+- **Pies line up.** Cards with several rows of pies (e.g. VT1 Static IS Blood On Disc) now lay them out in equal columns with every ring the same size and position, so an empty pie or a short legend no longer shifts the next one. Legend labels also get more room before being shortened.
+
 ## 2.5.1
 - **A card's own dates and filters.** ✎ Edit → *📅 Dates & filters…* and tick *Use this card's own dates and filters*. Pick its dates (all dates, the last N days, since a date, or between two dates), add filters (e.g. Module is CC, Build is one of v4.20.3, v4.20.4), and optionally *Only the newest row per …* (e.g. per Test), so a test that was re-run after a fix counts only its latest result. Every chart on the card uses them, on the dashboard and in exports, for everyone; a green note next to the title says so. Cards without it follow the dashboard as before.
 

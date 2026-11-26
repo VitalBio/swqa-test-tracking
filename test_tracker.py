@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.5.1"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.5.2"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -850,6 +850,73 @@ class WhatsNewDialog(QDialog):
         self.view.verticalScrollBar().setValue(0)
 
 
+class DateScopeRow(QWidget):
+    """Pick dates: a mode, plus a number of days or one or two dates. With `card_text`, the
+    first choice is the card's own dates (used in the export, to change them for one export)."""
+
+    MODES = [("follow", "Follow the dashboard's dates"), ("all", "All dates"),
+             ("days", "The last … days"), ("since", "Since a date"), ("between", "Between two dates")]
+
+    changed = pyqtSignal()
+
+    def __init__(self, dates=None, card_text=None, follow_label=None):
+        super().__init__()
+        d = dates or {}
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        self.mode = QComboBox()
+        self.mode.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.mode.setMinimumContentsLength(14)       # long choices elide instead of widening the row
+        if card_text:
+            self.mode.addItem(f"The card's own ({card_text})", "card")
+        for k, label in self.MODES:
+            self.mode.addItem(follow_label if (k == "follow" and follow_label) else label, k)
+        self.mode.setCurrentIndex(max(self.mode.findData(d.get("mode", "card" if card_text else "days")), 0))
+        self.days = QSpinBox()
+        self.days.setRange(1, 3650)
+        self.days.setValue(int(d.get("days") or 7))
+        self.days.setSuffix(" days")
+        today = QDate.currentDate()
+        def qdate(text, fallback):
+            q = QDate.fromString(text or "", "yyyy-MM-dd")
+            return q if q.isValid() else fallback
+        self.d_from = QDateEdit(qdate(d.get("from"), today.addDays(-6)))
+        self.d_to = QDateEdit(qdate(d.get("to"), today))
+        for ed in (self.d_from, self.d_to):
+            ed.setCalendarPopup(True)
+            ed.setDisplayFormat("MMM d, yyyy")
+            ed.dateChanged.connect(lambda *_: self.changed.emit())
+        self.and_lbl = QLabel("and")
+        for w_ in (self.mode, self.days, self.d_from, self.and_lbl, self.d_to):
+            h.addWidget(w_)
+        h.addStretch(1)
+        self.mode.currentIndexChanged.connect(self._modes)
+        self.days.valueChanged.connect(lambda *_: self.changed.emit())
+        self._modes()
+
+    def _modes(self, *_):
+        m = self.mode.currentData()
+        self.days.setVisible(m == "days")
+        self.d_from.setVisible(m in ("since", "between"))
+        self.and_lbl.setVisible(m == "between")
+        self.d_to.setVisible(m == "between")
+        self.changed.emit()
+
+    def value(self):
+        """{"mode": …, …}; None for "the card's own"."""
+        m = self.mode.currentData()
+        if m == "card":
+            return None
+        d = {"mode": m}
+        if m == "days":
+            d["days"] = self.days.value()
+        if m in ("since", "between"):
+            d["from"] = self.d_from.date().toString("yyyy-MM-dd")
+        if m == "between":
+            d["to"] = self.d_to.date().toString("yyyy-MM-dd")
+        return d
+
+
 class CardScopeDialog(QDialog):
     """✎ Edit → 📅 Dates & filters…: a card's own dates and filters, instead of the dashboard's.
     Off by default; turned on, every chart on the card uses them (saved with Done editing)."""
@@ -877,30 +944,7 @@ class CardScopeDialog(QDialog):
         self.on = QCheckBox("Use this card's own dates and filters (instead of the dashboard's)")
         self.on.setStyleSheet("font-weight:bold;")
         self.on.setChecked(bool(own.get("on")))
-        d = own.get("dates") or {}
-        self.mode = QComboBox()
-        for k, label in self.DATES:
-            self.mode.addItem(label, k)
-        self.mode.setCurrentIndex(max(self.mode.findData(d.get("mode", "days")), 0))
-        self.days = QSpinBox()
-        self.days.setRange(1, 3650)
-        self.days.setValue(int(d.get("days") or 7))
-        self.days.setSuffix(" days")
-        today = QDate.currentDate()
-        def qdate(text, fallback):
-            q = QDate.fromString(text or "", "yyyy-MM-dd")
-            return q if q.isValid() else fallback
-        self.d_from = QDateEdit(qdate(d.get("from"), today.addDays(-6)))
-        self.d_to = QDateEdit(qdate(d.get("to"), today))
-        for ed in (self.d_from, self.d_to):
-            ed.setCalendarPopup(True)
-            ed.setDisplayFormat("MMM d, yyyy")
-        self.and_lbl = QLabel("and")
-        date_row = QHBoxLayout()
-        for w_ in (self.mode, self.days, self.d_from, self.and_lbl, self.d_to):
-            date_row.addWidget(w_)
-        date_row.addStretch(1)
-        self.mode.currentIndexChanged.connect(self._modes)
+        self.dates = DateScopeRow(own.get("dates") or {"mode": "days", "days": 7})
 
         self.filters_box = QVBoxLayout()
         self.filters_box.setSpacing(4)
@@ -917,7 +961,7 @@ class CardScopeDialog(QDialog):
 
         form = QFormLayout()
         form.setSpacing(8)
-        form.addRow("Dates", date_row)
+        form.addRow("Dates", self.dates)
         fl = QVBoxLayout()
         fl.setContentsMargins(0, 0, 0, 0)
         fl.addLayout(self.filters_box)
@@ -948,14 +992,6 @@ class CardScopeDialog(QDialog):
         for f in own.get("filters") or []:
             if f and f[0]:
                 self._add_filter(*(list(f) + ["", ""])[:3])
-        self._modes()
-
-    def _modes(self, *_):
-        m = self.mode.currentData()
-        self.days.setVisible(m == "days")
-        self.d_from.setVisible(m in ("since", "between"))
-        self.and_lbl.setVisible(m == "between")
-        self.d_to.setVisible(m == "between")
 
     def _values(self, name):
         out = []
@@ -1010,15 +1046,7 @@ class CardScopeDialog(QDialog):
                 continue
             c, o, v = row.parts
             filters.append([c.currentData(), o.currentData(), v.currentText().strip()])
-        m = self.mode.currentData()
-        dates = {"mode": m}
-        if m == "days":
-            dates["days"] = self.days.value()
-        if m in ("since", "between"):
-            dates["from"] = self.d_from.date().toString("yyyy-MM-dd")
-        if m == "between":
-            dates["to"] = self.d_to.date().toString("yyyy-MM-dd")
-        return {"on": self.on.isChecked(), "dates": dates, "filters": filters,
+        return {"on": self.on.isChecked(), "dates": self.dates.value(), "filters": filters,
                 "latest": self.latest.currentData() or ""}
 
 
@@ -3161,7 +3189,7 @@ class SectionsPanel(QWidget):
                 w.hide()                           # which left the old list showing behind the new one
                 w.setParent(None)
                 w.deleteLater()
-        self.rows = {}
+        self.rows, self.card_dates = {}, {}
         order = self.cfg["order"]
         for i, sid in enumerate(order):
             name, opts = self.sections[sid]
@@ -3198,6 +3226,20 @@ class SectionsPanel(QWidget):
                     flow.addWidget(c)
                 v.addLayout(flow)
             if sid.startswith(export_sections.CARD):
+                tab_, card_ = export_sections.find_card(self.data, sid) if self.data else (None, None)
+                own = blocks.own_of(card_) if card_ else None
+                if own:                                 # its own dates: keep them, or change them for this export
+                    ctx0 = blocks.Ctx(None, "All dates")
+                    text = blocks.own_range(own, ctx0)[1]
+                    row = DateScopeRow((self.cfg.get("card_dates") or {}).get(sid), card_text=text,
+                                       follow_label="The export's dates")
+                    row.changed.connect(self._edited)
+                    holder_ = QHBoxLayout()
+                    holder_.setContentsMargins(58, 0, 0, 0)
+                    holder_.addWidget(_small_label("Dates", MUTED))
+                    holder_.addWidget(row, 1)
+                    v.addLayout(holder_)
+                    self.card_dates[sid] = row
                 note = _small_label(f"The charts on the {name} dashboard card.", MUTED)
                 note.setContentsMargins(58, 0, 0, 0)
                 v.addWidget(note)
@@ -3225,6 +3267,7 @@ class SectionsPanel(QWidget):
         for sid, (on, boxes) in self.rows.items():
             cfg["on"][sid] = on.isChecked()
             cfg["opts"][sid] = {k: c.isChecked() for k, c in boxes.items()}
+        cfg["card_dates"] = {sid: row.value() for sid, row in self.card_dates.items() if row.value()}
         return cfg
 
     def _edited(self, *_):
@@ -5555,8 +5598,36 @@ class Dashboard(QScrollArea):
                 cur = []
             if cur:
                 lines.append(cur)
+        # rows of charts only (pies…) line up as a grid: equal columns, each chart centred in
+        # its own, so a short legend or an empty pie doesn't push the next one sideways
+        def charts_only(items):
+            return all(not p.wide and not isinstance(p.content, str) for _, p in items)
+        grid_rows = [items for items in lines if charts_only(items)]
+        cols = max((len(items) for items in grid_rows), default=0) if len(grid_rows) > 1 else 0
+        built = {}
+        if cols:                                     # every pie in the grid as wide as the widest,
+            for items in grid_rows:                  # so the rings sit on the same lines
+                for _, p in items:
+                    built[id(p)] = self._part(tab, p, target)
+            donuts = [d for w_ in built.values() for d in
+                      ([w_] if isinstance(w_, charts.DonutChart) else w_.findChildren(charts.DonutChart))]
+            widest = max((d.width() for d in donuts), default=0)
+            room = (self.viewport().width() - 70 - 28 * (cols - 1)) // cols   # a column's width
+            if room > 220:
+                widest = min(widest, room)
+            for d in donuts:
+                d.setFixedWidth(widest)
         for items in lines:
             parts = [p for _, p in items]
+            if cols and charts_only(items):
+                h = QHBoxLayout()
+                h.setSpacing(28)
+                for b, p in items:
+                    h.addWidget(built[id(p)], 1, Qt.AlignTop | Qt.AlignHCenter)
+                for _ in range(cols - len(items)):      # keep the columns the same width
+                    h.addWidget(QWidget(), 1)
+                lay_.addLayout(h)
+                continue
             texts = [p for p in parts if isinstance(p.content, str)]
             if len(texts) > 1 and len(texts) == len(parts):     # side-by-side lists wrap
                 flow = _FlowColumns()
