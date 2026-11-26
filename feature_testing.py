@@ -36,8 +36,8 @@ DEFAULT_JQL = ('summary ~"[QA Testing]" AND (assignee=712020:b928dc8a-87ce-4da9-
 # Instruments to watch, by name: every ticket whose title names one (hardware support requests,
 # bugs, tasks), from their own JQL. Each summary ~ "…" term is an instrument.
 INST_JQL_KEY = "instrument_jql"
-DEFAULT_INST_JQL = ('spaceJira="VitalOne Product" AND (summary ~ "Cherry*" OR summary ~ "Proto-0028*" '
-                    'OR summary ~ "Proto-0022*")')
+DEFAULT_INST_JQL = ('spaceJira="VitalOne Product" AND type="Support Request" AND (summary ~ "Cherry*" OR '
+                    'summary ~ "Proto-0028*" OR summary ~ "Proto-0022*")')
 SYNC_MINUTES = 10
 SUPPORT_PROJECTS = ("V1P", "VKG")       # JIRA projects of Hardware Support Requests (VitalOne, Viking)
 HIDE_INST_PREFIX = "testing_hide_instrument:"   # admin: "testing_hide_instrument:<instrument>" → "1" hides it
