@@ -817,9 +817,57 @@ def _open_issue_list(fixes, ctx, show_tab):
     return "".join(lines)
 
 
+# ── instruments (from the feature-testing sync with JIRA) ────────────────────
+
+def _ipill(text, bg, fg):
+    return (f'<span style="background-color:{bg}; color:{fg}; font-size:11px">&nbsp;{esc(text)}&nbsp;</span>')
+
+def _instruments(b, tabs, ctx):
+    import changelog, feature_testing as ft
+    testing = (ctx.data or {}).get("testing")
+    title = lay.auto_title(tabs[0], b)
+    if not testing or not (testing.get("tickets") or testing.get("inst_tickets")):
+        return [Part(title, f'<span style="color:{MUTED}">Nothing synced from JIRA yet — the admin\'s app '
+                            f'syncs it (Feature Testing).</span>', wide=True, full=True)]
+    hidden = ft.hidden_instruments(ctx.settings)
+    insts = [i for i in ft.instruments(testing, ctx.rng)
+             if (i["open"] or i.get("watched")) and i["key"] not in hidden]
+    if not insts:
+        return [Part(title, f'<span style="color:{MUTED}">No instruments named in the instruments JQL, and none '
+                            f'waiting on hardware support.</span>', wide=True, full=True)]
+    jira = lambda key: (f'<a href="{changelog.JIRA_SITE}/browse/{esc(key)}" style="color:{LINK}; '
+                        f'text-decoration:none">{esc(key)}</a>')
+    today = date.today()
+    lines = []
+    for inst in insts:
+        n = len(inst["open"])
+        state = (_ipill("HW SUPPORT REQUESTED", "#FFF6E5", "#854F0B") if n else
+                 _ipill("FUNCTIONAL", "#E3F4E1", "#0B7A0B"))
+        bits = [f"{n} open ticket{'s' if n != 1 else ''}" if n else "no open tickets"]
+        if inst["last"]:
+            d = date.fromisoformat(inst["last"][1]["date"])
+            ago = (today - d).days
+            bits.append("last tested " + ("today" if ago == 0 else "yesterday" if ago == 1 else f"{d:%b %-d}"))
+        lines.append(f'<div style="margin-top:8px"><b style="font-size:13px">{esc(inst["name"])}</b>&nbsp; {state}'
+                     f'&nbsp; <span style="color:{MUTED}">{esc(" · ".join(bits))}</span></div>')
+        for r in sorted(inst["open"], key=lambda r: r.get("date") or "", reverse=True):
+            kind = r.get("type") if r.get("type") not in ("", None, "Support Request") else ""
+            lines.append(f'<div style="margin-left:14px">{_ipill(r["status"] or "Open", "#F1EFE8", "#5F5E5A")}'
+                         f'&nbsp; {jira(r["key"])} {esc(_breakable(r["summary"]))}'
+                         + (f'<span style="color:{MUTED}"> · {esc(kind)}</span>' if kind else "") + '</div>')
+    when = ""
+    try:
+        when = datetime.fromisoformat(testing["synced"]).strftime("%b %-d, %H:%M")
+    except (KeyError, ValueError, TypeError):
+        pass
+    if when:
+        lines.append(f'<div style="color:{MUTED}; font-size:11px; margin-top:8px">From JIRA · synced {when}</div>')
+    return [Part(title, "".join(lines), wide=True, full=True)]
+
+
 _RENDERERS = {"status": _status, "pie": _pie, "bars": _bars, "count": _count, "tally": _tally,
               "days": _days, "list": _list, "bug_summary": _bug_summary, "bug_list": _bug_list,
-              "resolved": _resolved, "by_subsystem": _by_subsystem}
+              "resolved": _resolved, "by_subsystem": _by_subsystem, "instruments": _instruments}
 
 
 # ── card headers ──────────────────────────────────────────────────────────────

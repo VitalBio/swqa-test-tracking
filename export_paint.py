@@ -139,6 +139,11 @@ class Kit:
             swaps.append((f'bgcolor="{stripe}"', f'bgcolor="{t["tile"]}"'))
         for a, b in swaps:
             html_ = html_.replace(a, b).replace(a.lower(), b)
+        # tags (e.g. instrument status): the dashboard's light tints → this theme's pills
+        for bg, fg, nbg, nfg in (("#F1EFE8", "#5F5E5A", t["pill"], t["pill_ink"]),
+                                 ("#FFF6E5", "#854F0B", t["pill"], t["warn"]),
+                                 ("#E3F4E1", "#0B7A0B", t["pill"], t["good"])):
+            html_ = html_.replace(f"background-color:{bg}; color:{fg}", f"background-color:{nbg}; color:{nfg}")
         return html_
 
     def rich(self, body, width, px=14, color="ink"):
@@ -909,7 +914,8 @@ class Painter(es.Renderer):
                          ("Efforts tested", len(tested), f"{len(active)} active in JIRA", "ink")], width))
         jira = lambda key, label: self.link(label, f"{changelog.JIRA_SITE}/browse/{key}")
         hidden = ft.hidden_instruments(self.data.get("settings"))
-        insts = [i for i in ft.instruments(testing, ctx.rng, keep) if i["key"] not in hidden] \
+        insts = [i for i in ft.instruments(testing, ctx.rng, keep, lambda p: es.chosen(self.cfg, p))
+                 if i["key"] not in hidden] \
             if self.opt("testing", "instruments") else []
         if insts:
             rows = []
@@ -920,7 +926,9 @@ class Painter(es.Renderer):
                 n = len(inst["open"])
                 if n:
                     rows.append(dict(link_html=name, tag="HW Support Requested", tag_color="warn",
-                                     text=f"{n} open support request{'s' if n != 1 else ''}",
+                                     text=f"{n} open " + ("support request" if all(r.get("type", "Support Request") ==
+                                                                   "Support Request" for r in inst["open"]) else "ticket")
+                                          + ("s" if n != 1 else ""),
                                      note=", ".join(r["key"] for r in inst["open"]), right=last_d, right_color="ink2"))
                 elif inst["logged"]:              # a ticket logged in these dates, already closed
                     m = len(inst["logged"])

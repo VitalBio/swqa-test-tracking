@@ -33,6 +33,11 @@ DEFAULT_JQL = ('summary ~"[QA Testing]" AND (assignee=712020:b928dc8a-87ce-4da9-
                'assignee=712020:18bee935-c4ad-4a7f-9868-66f9266e0472 OR '
                'assignee=712020:46184db6-b6e8-4d2f-a4c3-4251420c5c3f) AND (status!=Done AND '
                'status!="Closed (Won\'t Do)") AND type=Testing')
+# Instruments to watch, by name: every ticket whose title names one (hardware support requests,
+# bugs, tasks), from their own JQL. Each summary ~ "…" term is an instrument.
+INST_JQL_KEY = "instrument_jql"
+DEFAULT_INST_JQL = ('spaceJira="VitalOne Product" AND (summary ~ "Cherry*" OR summary ~ "Proto-0028*" '
+                    'OR summary ~ "Proto-0022*")')
 SYNC_MINUTES = 10
 SUPPORT_PROJECTS = ("V1P", "VKG")       # JIRA projects of Hardware Support Requests (VitalOne, Viking)
 HIDE_INST_PREFIX = "testing_hide_instrument:"   # admin: "testing_hide_instrument:<instrument>" → "1" hides it
@@ -48,6 +53,22 @@ PART_RE = re.compile(r"^\s*PT\s*(\d+)\s*[-–:]\s*", re.I)
 
 def jql(settings):
     return ((settings or {}).get(JQL_KEY) or "").strip() or DEFAULT_JQL
+
+def inst_jql(settings):
+    v = (settings or {}).get(INST_JQL_KEY)
+    return DEFAULT_INST_JQL if v is None else v.strip()      # "" turns watching off
+
+def watched_names(query):
+    """The instruments a JQL names: summary ~ "Proto-0028*" → Proto-0028."""
+    out = []
+    for m in re.findall(r'summary\s*~\s*"([^"]+)"', query or "", re.I):
+        name = m.strip().strip("*").strip()
+        if name and name.lower() not in (n.lower() for n in out):
+            out.append(name)
+    return out
+
+def _norm(text):
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
 
 def effort_name(summary):
     """ "PT3 - [QA TESTING] - SIFT SWQA Exploratory Testing" → "SIFT SWQA Exploratory Testing"."""
@@ -302,7 +323,39 @@ def guess_kind(session_date, bug, context):
         return "new"
     return "seen"
 
-def snapshot(query, progress=lambda m: None):
+def fetch_instrument_tickets(query, progress=lambda m: None):
+    """[{key, summary, status, status_category, type, created, updated}] for the instruments JQL."""
+    import requests
+    c = changelog.credentials()
+    out, token = [], None
+    while True:
+        progress(f"Reading instrument tickets from JIRA ({len(out)} so far)…")
+        body = {"jql": query, "maxResults": 100,
+                "fields": ["summary", "status", "issuetype", "created", "updated"]}
+        if token:
+            body["nextPageToken"] = token
+        try:
+            r = requests.post(f"{changelog.JIRA_SITE}/rest/api/3/search/jql", auth=(c["jira_email"], c["jira"]),
+                              headers={"Accept": "application/json", "Content-Type": "application/json"},
+                              json=body, timeout=60)
+        except requests.RequestException as exc:
+            raise changelog.ChangeLogError(f"Couldn't reach JIRA ({type(exc).__name__}).")
+        if r.status_code >= 400:
+            raise changelog.ChangeLogError(f"JIRA answered {r.status_code}: {r.text[:300]}")
+        data = r.json()
+        for it in data.get("issues", []):
+            f = it["fields"]
+            st = f.get("status") or {}
+            out.append({"key": it["key"], "summary": f.get("summary") or "", "status": st.get("name", ""),
+                        "status_category": (st.get("statusCategory") or {}).get("key", ""),
+                        "type": (f.get("issuetype") or {}).get("name", ""),
+                        "created": (f.get("created") or "")[:10], "updated": (f.get("updated") or "")[:10]})
+        token = data.get("nextPageToken")
+        if not token or data.get("isLast", True) or len(out) >= 400:
+            break
+    return out
+
+def snapshot(query, progress=lambda m: None, inst_query=""):
     tickets = fetch(query, progress)
     keys = [k for t in tickets for s in t["sessions"] for k in s.get("support", [])]
     bugs = [k for t in tickets for s in t["sessions"] for k in s["bugs"]]
@@ -313,8 +366,15 @@ def snapshot(query, progress=lambda m: None):
             s["bugs"] = [k for k in s["bugs"] if (bug_info.get(k) or {}).get("type", "Bug").lower() == "bug"]
             s["bug_kinds"] = {k: guess_kind(s["date"], bug_info.get(k), s.get("bug_context", {}).get(k, ""))
                               for k in s["bugs"]}
-    return {"jql": query, "synced": datetime.now().isoformat(timespec="seconds"), "tickets": tickets,
-            "support": support_info(keys) if keys else {}, "bug_info": bug_info}
+    snap = {"jql": query, "synced": datetime.now().isoformat(timespec="seconds"), "tickets": tickets,
+            "support": support_info(keys) if keys else {}, "bug_info": bug_info,
+            "inst_jql": inst_query, "inst_tickets": [], "inst_error": ""}
+    if inst_query:
+        try:
+            snap["inst_tickets"] = fetch_instrument_tickets(inst_query, progress)
+        except changelog.ChangeLogError as exc:      # the testing sync still goes through
+            snap["inst_error"] = str(exc)
+    return snap
 
 def bug_kind(settings, ticket, session, key):
     """New or seen again, with the admin's correction if there is one."""
@@ -404,14 +464,19 @@ def support_resolved(t):
     return t.get("status_category") == "done" or (t.get("status") or "").strip().lower() in SUPPORT_RESOLVED
 
 
-def instruments(testing, rng, keep=lambda e: True):
+def _product_of_key(key):
+    return "Viking" if key.startswith("VKG-") else "VitalOne"
+
+def instruments(testing, rng, keep=lambda e: True, product_ok=lambda p: True):
     """The state of each instrument (a session's Test System): open Hardware Support Requests
     on it (any date — they're open now), and its last session. Lists instruments with an open
     request, or with a session in rng. A request names its instrument at the start of its
     title ("Proto-0024 - …") when it can; otherwise it's the session's instrument.
     [{key, name, open: [{key, summary, status, effort, ticket, n, date}], logged: requests logged
       in a session in rng (any status, same fields), last: (effort, session) or None,
-      in_range: sessions in rng}] — instruments with open requests first."""
+      in_range: sessions in rng, watched: named in the instruments JQL}] — instruments with open
+    requests first. Instruments the instruments JQL names are always listed, with every open
+    ticket whose title names them (as well as the requests logged in test sessions)."""
     info = (testing or {}).get("support") or {}
     lo, hi = (rng[0].isoformat(), rng[1].isoformat()) if rng else ("", "9999")
     spell, last, count, requests, in_rng = {}, {}, {}, {}, set()
@@ -451,11 +516,30 @@ def instruments(testing, rng, keep=lambda e: True):
             open_by.setdefault(k, []).append(req)
         if x in in_rng:
             logged_by.setdefault(k, []).append(req)
+    watched = set()
+    for name in watched_names((testing or {}).get("inst_jql")):
+        n = _norm(name)
+        k = next((k for k in spell if _norm(k) == n), _inst_key(name))
+        watched.add(k)
+        spell.setdefault(k, {}).setdefault(name, 0)
+        have = {r["key"] for r in open_by.get(k, []) + logged_by.get(k, [])}
+        for t in (testing or {}).get("inst_tickets") or []:
+            if t["key"] in have or n not in _norm(t["summary"]) or not product_ok(_product_of_key(t["key"])):
+                continue
+            done = support_resolved(t)
+            req = {"key": t["key"], "summary": t["summary"], "status": t["status"], "done": done,
+                   "type": t.get("type", ""), "effort": "", "product": _product_of_key(t["key"]),
+                   "ticket": "", "n": None, "date": t.get("created", "")}
+            if not done:
+                open_by.setdefault(k, []).append(req)
+            elif t.get("updated") and lo <= t["updated"] <= hi:     # closed in these dates
+                logged_by.setdefault(k, []).append(req)
     out = []
     for k in spell:
-        if k in open_by or k in logged_by or count.get(k):
+        if k in watched or k in open_by or k in logged_by or count.get(k):
             out.append({"key": k, "name": _inst_label(spell[k]), "open": sorted(open_by.get(k, []), key=lambda r: r["date"] or ""),
-                        "logged": logged_by.get(k, []), "last": last.get(k), "in_range": count.get(k, 0)})
+                        "logged": logged_by.get(k, []), "last": last.get(k), "in_range": count.get(k, 0),
+                        "watched": k in watched})
     out.sort(key=lambda i: (not i["open"], -(int((i["last"][1]["date"] or "0").replace("-", "")) if i["last"] else 0),
                             i["name"].lower()))
     return out
@@ -465,10 +549,11 @@ def instruments(testing, rng, keep=lambda e: True):
 
 def to_rows(snap):
     """Rows for the hidden tab: a header, then one row per ticket as JSON (split over cells)."""
-    rows = [["key", "updated", "data"], ["_meta", snap["synced"], json.dumps({"jql": snap["jql"],
-                                                                               "synced": snap["synced"],
-                                                                               "support": snap.get("support", {}),
-                                                                               "bug_info": snap.get("bug_info", {})})]]
+    meta = json.dumps({"jql": snap["jql"], "synced": snap["synced"], "support": snap.get("support", {}),
+                       "bug_info": snap.get("bug_info", {}), "inst_jql": snap.get("inst_jql", ""),
+                       "inst_tickets": snap.get("inst_tickets", []), "inst_error": snap.get("inst_error", "")},
+                      separators=(",", ":"))
+    rows = [["key", "updated", "data"], ["_meta", snap["synced"]] + [meta[i:i + CHUNK] for i in range(0, len(meta), CHUNK)]]
     for t in snap["tickets"]:
         text = json.dumps(t, separators=(",", ":"))
         rows.append([t["key"], t["updated"]] + [text[i:i + CHUNK] for i in range(0, len(text), CHUNK)])

@@ -40,6 +40,8 @@ BLOCK_TYPES = {
     "bug_list":     ("Bug list",                        False, "New, closed, or in-QA bugs"),
     "resolved":     ("Resolved vs not resolved",        False, "With days to resolve and a summary"),
     "by_subsystem": ("Resolved / unresolved, by subsystem", False, "Tally of issues by subsystem"),
+    "instruments":  ("Instrument status",               False, "Each instrument: functional or waiting on "
+                                                               "hardware support, with its open JIRA tickets"),
     "sql":          ("Query chart",                     False, "Any SQL query, drawn as a pie, bars, "
                                                                "per day, or a table"),
 }
@@ -136,6 +138,8 @@ def auto_title(tab, b):
         return "Resolved Issues from Failed Runs" if store.is_run_tab(tab) else "Resolved"
     if t == "sql":
         return b.get("title") or "Query"
+    if t == "instruments":
+        return "Instrument Status"
     if t == "by_subsystem":
         return "Resolved, by subsystem" if b.get("which") == "resolved" else "Unresolved, by subsystem"
     return name
@@ -265,7 +269,13 @@ def gallery(tab):
             nb = copy.deepcopy(b)
             nb.update(id=new_id(), dash=True, new_row=False)
             out.append((label, nb))
+    out.append(("Instrument Status  (from JIRA)", instruments_block()))
     return out
+
+def instruments_block():
+    """Each instrument's state from the feature-testing sync (Feature Testing → JQL…)."""
+    return {"id": new_id(), "type": "instruments", "title": "", "dash": True, "export": True,
+            "new_row": False, "column": None}
 
 
 def card_title(tab, card):

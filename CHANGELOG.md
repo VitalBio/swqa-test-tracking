@@ -1,5 +1,10 @@
 # What's new
 
+## 2.6.0
+- **Instrument status from JIRA.** Feature Testing → *JQL…* has a new *Instruments* box with its own JQL. Each `summary ~ "…"` in it is an instrument; by default CHERRY, PROTO-0028 and PROTO-0022 in VitalOne Product. Those instruments are always listed under Instruments, with every open ticket whose title names them, and are marked *Functional* when none are open. Hardware support requests logged in test sessions still show for any other instrument, as before.
+- **Instrument Status card.** On any card (including a new custom card), ✎ Edit → *▦ Add from gallery* → *Instrument Status (from JIRA)*. It shows each instrument's state, its open tickets with their status, and when it was last tested, on the dashboard and in exports.
+- The *📅 Dates & filters…* button showed as "Dates_filters…"; fixed.
+
 ## 2.5.4
 - **Bug creation dates in the export.** The New Bugs section of Export now shows when each bug was opened (e.g. *Opened Nov 26*), next to its status, for both the open and closed lists. It's a tick under New Bugs (*Bug Creation Date*), on by default; untick it to leave dates out.
 

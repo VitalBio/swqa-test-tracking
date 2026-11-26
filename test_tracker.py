@@ -52,7 +52,7 @@ import ui_theme
 import views
 
 APP_TITLE   = "Test Tracker"
-APP_VERSION = "2.5.4"         # bump this for each release, then push a matching tag (v2.4.0)
+APP_VERSION = "2.6.0"         # bump this for each release, then push a matching tag (v2.4.0)
 APP_CHANNEL = "stable"        # "stable" or "testing": testing releases are published as GitHub
                               # pre-releases, so the ⬆ Update button on stable copies never offers them
 REFRESH_MS  = 60_000          # pull changes from the sheet every minute
@@ -4847,16 +4847,21 @@ class FeatureTestingPage(QWidget):
                     f'{self._jira(s["ticket"], "S" + str(s["n"]))}')
         else:
             last = "no sessions logged on it"
-        state = self._pill("HARDWARE SUPPORT REQUESTED", "#FFF6E5", "#854F0B")
+        state = (self._pill("HARDWARE SUPPORT REQUESTED", "#FFF6E5", "#854F0B") if inst["open"] else
+                 self._pill("FUNCTIONAL", "#E3F4E1", "#0B7A0B"))
         hide = (f'&nbsp; <a href="inst:{html.escape(inst["key"])}:hide" style="color:#8A8984; font-size:11px">'
                 f'hide</a>') if admin else ""
         bl.addWidget(self._rich(f'<b style="font-size:14px">{html.escape(inst["name"])}</b>&nbsp; {state}'
                                 f'&nbsp; <span style="color:#8A8984">{last}</span>{hide}', 13))
         for r in inst["open"]:
+            kind = r.get("type") if r.get("type") and r.get("type") != "Support Request" else ""
+            src = (f' · from {html.escape(r["effort"])} {self._jira(r["ticket"], r["ticket"] + " S" + str(r["n"]))}'
+                   if r.get("ticket") else "")
             bl.addWidget(self._rich(
                 f'{self._pill(r["status"] or "Open")}&nbsp; {self._jira(r["key"])} {html.escape(r["summary"])}'
-                f'<span style="color:#8A8984"> · from {html.escape(r["effort"])} '
-                f'{self._jira(r["ticket"], r["ticket"] + " S" + str(r["n"]))}</span>', 12))
+                f'<span style="color:#8A8984">{" · " + html.escape(kind) if kind else ""}{src}</span>', 12))
+        if not inst["open"]:
+            bl.addWidget(self._rich("No open tickets name it.", 12, "#8A8984"))
         return box
 
     def refresh(self, *_):
@@ -4931,8 +4936,9 @@ class FeatureTestingPage(QWidget):
                 ("No session in 7+ days", len(stale), "active efforts", "#B26B00" if stale else INK)):
             tiles.addWidget(blocks._tile_widget(label, value, color, sub, None), 1)
         v.addLayout(tiles)
-        insts = [i for i in feature_testing.instruments(testing, rng, lambda e: not product or e["product"] == product)
-                 if i["open"]]                  # only instruments waiting on hardware support
+        insts = [i for i in feature_testing.instruments(testing, rng, lambda e: not product or e["product"] == product,
+                                                        lambda p: not product or p == product)
+                 if i["open"] or i.get("watched")]   # waiting on hardware support, or named in the instruments JQL
         hidden_keys = feature_testing.hidden_instruments(settings)
         hidden = [i for i in insts if i["key"] in hidden_keys]
         insts = [i for i in insts if i["key"] not in hidden_keys]
@@ -4940,6 +4946,9 @@ class FeatureTestingPage(QWidget):
             lbl = QLabel("Instruments")
             lbl.setStyleSheet("font-size:13px; font-weight:bold; color:#52514E; padding-top:8px;")
             v.addWidget(lbl)
+            if admin and testing.get("inst_error"):
+                v.addWidget(self._rich("Couldn't read the instruments JQL: " + html.escape(testing["inst_error"]),
+                                       12, "#B26B00"))
             for inst in insts:
                 v.addWidget(self._instrument(inst, today, admin))
             if hidden and admin:                # only the admin sees what's hidden, to show it again
@@ -5442,7 +5451,7 @@ class Dashboard(QScrollArea):
             settings_btn = QPushButton("Card settings…")
             settings_btn.setObjectName("link")
             settings_btn.clicked.connect(lambda: self.win.card_settings(tab, card))
-            scope_btn = QPushButton("📅 Dates & filters…")
+            scope_btn = QPushButton("📅 Dates && filters…")
             scope_btn.setObjectName("link")
             scope_btn.setToolTip("Give this card its own dates and filters, instead of the dashboard's")
             scope_btn.clicked.connect(lambda: QTimer.singleShot(0, lambda: self.win.edit_card_scope(tab, card)))
@@ -7087,9 +7096,10 @@ class TrackerApp(QMainWindow):
         self._testing_busy, self._testing_at = True, time.time()
         self._set_jira("syncing")
         query, src = feature_testing.jql(_settings(self)), self.source
+        inst_query = feature_testing.inst_jql(_settings(self))
 
         def work():
-            snap = feature_testing.snapshot(query)
+            snap = feature_testing.snapshot(query, inst_query=inst_query)
             src.save_testing(feature_testing.to_rows(snap))
             return snap
 
@@ -7143,10 +7153,20 @@ class TrackerApp(QMainWindow):
         dlg.setMinimumWidth(640)
         edit = QPlainTextEdit(feature_testing.jql(settings))
         edit.setMinimumHeight(140)
+        inst = QPlainTextEdit(feature_testing.inst_jql(settings))
+        inst.setMinimumHeight(90)
         lay_ = QVBoxLayout(dlg)
         lay_.addWidget(_small_label("Which JIRA tickets count as feature testing. Saved in the sheet; your app "
                                     "syncs them for everyone.", MUTED))
         lay_.addWidget(edit)
+        head = QLabel("Instruments")
+        head.setStyleSheet("font-weight:bold; padding-top:8px;")
+        lay_.addWidget(head)
+        lay_.addWidget(_small_label('Instruments to always show, with every open ticket whose title names them. '
+                                    'Each summary ~ "…" is one instrument (e.g. summary ~ "Proto-0028*"). '
+                                    'Hardware support requests logged in test sessions still show for any '
+                                    'other instrument. Leave empty to only use the test sessions.', MUTED))
+        lay_.addWidget(inst)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dlg.accept)
         buttons.rejected.connect(dlg.reject)
@@ -7155,6 +7175,7 @@ class TrackerApp(QMainWindow):
             return
         settings = dict(settings)
         settings[feature_testing.JQL_KEY] = " ".join(edit.toPlainText().split())
+        settings[feature_testing.INST_JQL_KEY] = " ".join(inst.toPlainText().split())
         self._save_settings(settings, "Feature-testing JQL saved.")
         QTimer.singleShot(500, lambda: self.sync_testing(force=True))
 
