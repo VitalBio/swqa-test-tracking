@@ -805,9 +805,12 @@ class Painter(es.Renderer):
             key = r["values"][bugs.key_col["pos"]]
             links = store.cell_links(r, bugs.key_col["pos"])
             tag = next((n for n, test in product_of.items() if test(r)), None) if product_of else None
+            made = bugs.when(r, bugs.made) if self.opt("bugs", "created") else None
             rows.append(dict(link_html=("✓ " if done else "") + self.links(key, links), tag=None,
                              text=bugs.val(r, bugs.summary_col) + (f"  ({tag})" if tag else ""),
-                             right=bugs.st[id(r)], right_color="ink2"))
+                             right=bugs.st[id(r)], right_color="ink2",
+                             date=(f"Opened {made:%b} {made.day}" + (f", {made.year}" if made.year != date.today().year
+                                                                     else "")) if made else ""))
         return self._bug_rows(rows, width)
 
     def _bug_rows(self, rows, width):
@@ -818,7 +821,13 @@ class Painter(es.Renderer):
         rf = font(15)
         rfm = QFontMetrics(rf)
         pill_w = max(QFontMetrics(font(13)).horizontalAdvance(r["right"]) + 20 for r in rows)
-        avail = width - fw - pill_w - 20
+        df = font(13)
+        date_w = max((QFontMetrics(df).horizontalAdvance(r.get("date", "")) for r in rows), default=0)
+        date_w = date_w + 16 if date_w else 0     # "Opened Nov 3", between summary and status
+        if date_w and width - fw - pill_w - date_w - 20 < 260:     # tight column: just the date
+            rows = [dict(r, date=r["date"].replace("Opened ", "")) for r in rows]
+            date_w = max(QFontMetrics(df).horizontalAdvance(r["date"]) for r in rows) + 16
+        avail = width - fw - pill_w - date_w - 20
         line = rfm.lineSpacing()
 
         def wrapped(text):
@@ -857,6 +866,11 @@ class Painter(es.Renderer):
                 p.setPen(k.c("ink"))
                 for j, t in enumerate(texts[i]):
                     p.drawText(QRectF(x + fw, top + j * line, avail, line), Qt.AlignVCenter | Qt.AlignLeft, t)
+                if r.get("date"):
+                    p.setFont(df)
+                    p.setPen(k.c("muted"))
+                    p.drawText(QRectF(x + width - pill_w - date_w, top, date_w - 12, line),
+                               Qt.AlignVCenter | Qt.AlignRight, r["date"])
                 k.pill(p, x + width - pill_w, top + line / 2, r["right"])
                 ry += row_h
         return Item(sum(heights), draw)

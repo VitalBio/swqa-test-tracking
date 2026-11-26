@@ -1,5 +1,8 @@
 # What's new
 
+## 2.5.4
+- **Bug creation dates in the export.** The New Bugs section of Export now shows when each bug was opened (e.g. *Opened Nov 26*), next to its status, for both the open and closed lists. It's a tick under New Bugs (*Bug Creation Date*), on by default; untick it to leave dates out.
+
 ## 2.5.3
 - **New / Closed / In QA side by side.** The bug lists on Bug Statuses (and other side-by-side lists) used to sit in a row only if all of them fitted at full width, otherwise they stacked in one column. Now they share the row in equal columns, wrapping long summaries when space is tight, and only move to a second row when a list would get less than ~260px.
 
