@@ -6,7 +6,7 @@ name: Release notes
 on:
   push:
     branches: [main]
-    paths: ["CHANGELOG.md", "release_notes.py", ".github/workflows/release-notes.yml"]
+    paths: ["CHANGELOG.md", "scripts/release_notes.py", ".github/workflows/release-notes.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,4 +25,4 @@ jobs:
       - name: Add notes to releases without them
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python release_notes.py backfill
+        run: python scripts/release_notes.py backfill

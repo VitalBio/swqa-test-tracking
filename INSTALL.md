@@ -69,7 +69,7 @@ You only need to do this once. The Terminal method above skips this warning.
 <summary><b>Intel Mac</b></summary>
 
 The ready-made app only runs on Apple Silicon. On an Intel Mac, build it yourself with
-Python 3: download the code, then run `./build_mac.sh --install` in Terminal from that folder.
+Python 3: download the code, then run `./scripts/build_mac.sh --install` in Terminal from that folder.
 
 </details>
 
@@ -88,7 +88,7 @@ Python 3: download the code, then run `./build_mac.sh --install` in Terminal fro
 
 ### For Shiv: publishing a new version
 
-1. In `test_tracker.py`, bump the version near the top:
+1. In `src/test_tracker.py`, bump the version near the top:
 
    ```python
    APP_VERSION = "1.0.1"

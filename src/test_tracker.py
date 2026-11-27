@@ -781,8 +781,8 @@ class CardColorsDialog(QDialog):
 # ── what's new ────────────────────────────────────────────────────────────────
 
 def _changelog_text():
-    """CHANGELOG.md, bundled into the app by build_mac.sh (next to this file when run from source)."""
-    here = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    """CHANGELOG.md, bundled into the app by build_mac.sh (the repo root when run from source)."""
+    here = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
         with open(os.path.join(here, "CHANGELOG.md"), encoding="utf-8") as f:
             return f.read()

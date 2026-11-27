@@ -256,10 +256,10 @@ See **[INSTALL.md](INSTALL.md)** for step-by-step instructions to share with cow
 
 ### Building it yourself
 
-`./build_mac.sh --install` builds `Test Tracker.app` from source and copies it to
+`./scripts/build_mac.sh --install` builds `Test Tracker.app` from source and copies it to
 `/Applications`. Drop `--install` to only build into `dist/`.
 
-To publish a new version for everyone, bump `APP_VERSION` at the top of `test_tracker.py`,
+To publish a new version for everyone, bump `APP_VERSION` at the top of `src/test_tracker.py`,
 commit, and push a matching tag (e.g. `v1.0.1`). GitHub Actions checks that the two match,
 builds the app, and attaches it to a GitHub Release. The install line downloads it, and the
 app's **⬆ Update** button installs it.
@@ -283,14 +283,14 @@ and click **Install this version** (the app closes, installs it, and reopens). O
 curl -fsSL https://raw.githubusercontent.com/VitalBio/swqa-test-tracking/main/install.sh | TRACKER_ZIP_URL=https://github.com/VitalBio/swqa-test-tracking/releases/download/v1.1.7/Test-Tracker-mac.zip bash
 ```
 
-**Windows:** run `build_windows.bat` on a Windows PC with Python 3. The app ends up in
+**Windows:** run `scripts\build_windows.bat` on a Windows PC with Python 3. The app ends up in
 `dist\Test Tracker\Test Tracker.exe`.
 
 **Run from source (for development):**
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python test_tracker.py
+.venv/bin/python src/test_tracker.py
 ```
 
 ## Connect a Google Sheet
@@ -315,19 +315,34 @@ To set up a new one (about 10 minutes):
 
 ## Files
 
+```
+src/          the app (run src/test_tracker.py)
+scripts/      building and releasing
+assets/       the app icon
+.github/      release workflows and the install steps shown on each release
+install.sh    the one-line installer and updater (stays at the top: installed apps fetch it to update)
+```
+
 | File | What it is |
 |------|------------|
-| `test_tracker.py` | The app: window, dashboard, tables, editing, updates |
-| `tracker_store.py` | Reading and writing the Google Sheet, settings, and the offline cache |
-| `charts.py` | The donut, bar, per-day, and tally charts (drawn with Qt, no extra libraries) |
-| `layout.py` | Card layouts: what each card shows, built-in defaults, saved customizations |
-| `blocks.py` | Draws each kind of chart/list in a card, for both the dashboard and the export |
-| `sqldata.py` | The sheet as an in-memory SQLite database (tables per tab, and the runs/issues/resolutions/bugs views) |
-| `chartquery.py` | Query charts: the Simple form's SQL, and how a query result becomes a chart |
-| `changelog.py` | Change logs: GitHub compare → PRs → PROD tickets in JIRA → categories; saved in the sheet |
-| `export_report.py` | The snapshot export: arranges the cards and saves the PNG(s) and PDF |
-| `install.sh` | The one-line installer and updater |
-| `build_mac.sh` | Builds the `.app` |
+| `src/test_tracker.py` | The app: window, dashboard, tables, editing, updates |
+| `src/tracker_store.py` | Reading and writing the Google Sheet, settings, and the offline cache |
+| `src/charts.py` | The donut, bar, per-day, and tally charts (drawn with Qt, no extra libraries) |
+| `src/layout.py` | Card layouts: what each card shows, built-in defaults, saved customizations |
+| `src/blocks.py` | Draws each kind of chart/list in a card, for both the dashboard and the export |
+| `src/views.py` | Custom views: named sets of cards, personal or shared |
+| `src/sqldata.py` | The sheet as an in-memory SQLite database (tables per tab, and the runs/issues/resolutions/bugs views) |
+| `src/chartquery.py` | Query charts: the Simple form's SQL, and how a query result becomes a chart |
+| `src/changelog.py` | Change logs: GitHub compare → PRs → PROD tickets in JIRA → categories; saved in the sheet |
+| `src/feature_testing.py` | Feature testing and instrument status, synced from JIRA |
+| `src/export_report.py` | The snapshot export: arranges the cards and saves the PNG(s) and PDF |
+| `src/export_paint.py` | Draws the export's sections (light and dark) |
+| `src/export_sections.py` | Which sections and cards go in an export, and their options |
+| `src/ui_theme.py`, `src/motion.py` | Light / dark look, and animations |
+| `scripts/build_mac.sh` | Builds the `.app` (`--install` also copies it to Applications) |
+| `scripts/build_windows.bat` | Builds the Windows app |
+| `scripts/release_notes.py` | Release notes from `CHANGELOG.md`, used by the release workflows |
+| `scripts/make_icon.py` | Draws `assets/icon.png` and `assets/icon.icns` |
 | `.github/workflows/release.yml` | Builds and publishes a release when a `v*` tag is pushed |
 
 Settings, the key, and the offline cache live in `~/Library/Application Support/TestTracker`.
