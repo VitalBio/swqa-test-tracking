@@ -259,7 +259,7 @@ See **[INSTALL.md](INSTALL.md)** for step-by-step instructions to share with cow
 `./scripts/build_mac.sh --install` builds `Test Tracker.app` from source and copies it to
 `/Applications`. Drop `--install` to only build into `dist/`.
 
-To publish a new version for everyone, bump `APP_VERSION` at the top of `src/test_tracker.py`,
+To publish a new version for everyone, bump `APP_VERSION` in `src/app_info.py`,
 commit, and push a matching tag (e.g. `v1.0.1`). GitHub Actions checks that the two match,
 builds the app, and attaches it to a GitHub Release. The install line downloads it, and the
 app's **⬆ Update** button installs it.
@@ -316,29 +316,47 @@ To set up a new one (about 10 minutes):
 ## Files
 
 ```
-src/          the app (run src/test_tracker.py)
-scripts/      building and releasing
-assets/       the app icon
-.github/      release workflows and the install steps shown on each release
-install.sh    the one-line installer and updater (stays at the top: installed apps fetch it to update)
+src/
+  test_tracker.py      the main window; run this
+  app_info.py          name, version (bump APP_VERSION for a release), where releases live
+  ui/                  the windows
+  dashboard/           what a dashboard card draws
+  data/                the Google Sheet, the offline cache, and the sheet as SQL
+  export/              the PNG / PDF export
+  integrations/        JIRA and GitHub
+scripts/               building and releasing
+assets/                the app icon
+.github/               release workflows and the install steps shown on each release
+install.sh             the one-line installer and updater (stays at the top: installed apps fetch it to update)
 ```
 
 | File | What it is |
 |------|------------|
-| `src/test_tracker.py` | The app: window, dashboard, tables, editing, updates |
-| `src/tracker_store.py` | Reading and writing the Google Sheet, settings, and the offline cache |
-| `src/charts.py` | The donut, bar, per-day, and tally charts (drawn with Qt, no extra libraries) |
-| `src/layout.py` | Card layouts: what each card shows, built-in defaults, saved customizations |
-| `src/blocks.py` | Draws each kind of chart/list in a card, for both the dashboard and the export |
-| `src/views.py` | Custom views: named sets of cards, personal or shared |
-| `src/sqldata.py` | The sheet as an in-memory SQLite database (tables per tab, and the runs/issues/resolutions/bugs views) |
-| `src/chartquery.py` | Query charts: the Simple form's SQL, and how a query result becomes a chart |
-| `src/changelog.py` | Change logs: GitHub compare → PRs → PROD tickets in JIRA → categories; saved in the sheet |
-| `src/feature_testing.py` | Feature testing and instrument status, synced from JIRA |
-| `src/export_report.py` | The snapshot export: arranges the cards and saves the PNG(s) and PDF |
-| `src/export_paint.py` | Draws the export's sections (light and dark) |
-| `src/export_sections.py` | Which sections and cards go in an export, and their options |
-| `src/ui_theme.py`, `src/motion.py` | Light / dark look, and animations |
+| `src/test_tracker.py` | The main window: tabs, sync, saving settings, updates, admin passcode |
+| `src/app_info.py` | `APP_VERSION`, `APP_CHANNEL`, the GitHub repo |
+| `src/ui/dashboard_page.py` | The dashboard: cards, top tiles, views, editing cards in place |
+| `src/ui/card_editors.py` | + Add chart, tiles, card settings, a card's own dates and filters, its colours |
+| `src/ui/table_page.py` | A sheet tab as a table: sorting, filters, editing cells, adding rows |
+| `src/ui/feature_testing_page.py` | The Feature Testing tab |
+| `src/ui/change_log_page.py` | The Change Log tab |
+| `src/ui/export_dialog.py` | 📤 Export: choosing and arranging sections |
+| `src/ui/settings_dialogs.py` | ⚙ Settings, the admin passcode, chart colours, tokens |
+| `src/ui/updates.py` | What's new and installing another version |
+| `src/ui/dates.py` | The Dates bar and date pickers |
+| `src/ui/common.py` | Small shared helpers and layouts |
+| `src/ui/theme.py`, `src/ui/motion.py` | Light / dark look, and animations |
+| `src/dashboard/blocks.py` | Draws each kind of chart/list in a card, for both the dashboard and the export |
+| `src/dashboard/charts.py` | The donut, bar, per-day, and tally charts (drawn with Qt, no extra libraries) |
+| `src/dashboard/layout.py` | Card layouts: what each card shows, built-in defaults, saved customizations |
+| `src/dashboard/views.py` | Custom views: named sets of cards, personal or shared |
+| `src/data/store.py` | Reading and writing the Google Sheet, settings, and the offline cache |
+| `src/data/sqldata.py` | The sheet as an in-memory SQLite database (tables per tab, and the runs/issues/resolutions/bugs views) |
+| `src/data/chartquery.py` | Query charts: the Simple form's SQL, and how a query result becomes a chart |
+| `src/export/report.py` | The snapshot export: arranges the cards and saves the PNG(s) and PDF |
+| `src/export/paint.py` | Draws the export's sections (light and dark) |
+| `src/export/sections.py` | Which sections and cards go in an export, and their options |
+| `src/integrations/changelog.py` | Change logs: GitHub compare → PRs → PROD tickets in JIRA → categories; saved in the sheet |
+| `src/integrations/feature_testing.py` | Feature testing and instrument status, synced from JIRA |
 | `scripts/build_mac.sh` | Builds the `.app` (`--install` also copies it to Applications) |
 | `scripts/build_windows.bat` | Builds the Windows app |
 | `scripts/release_notes.py` | Release notes from `CHANGELOG.md`, used by the release workflows |

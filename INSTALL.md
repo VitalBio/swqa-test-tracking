@@ -88,7 +88,7 @@ Python 3: download the code, then run `./scripts/build_mac.sh --install` in Term
 
 ### For Shiv: publishing a new version
 
-1. In `src/test_tracker.py`, bump the version near the top:
+1. In `src/app_info.py`, bump the version near the top:
 
    ```python
    APP_VERSION = "1.0.1"

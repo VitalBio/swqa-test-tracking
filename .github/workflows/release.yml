@@ -23,16 +23,16 @@ jobs:
       - name: Check tag matches APP_VERSION
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          version="$(sed -n 's/^APP_VERSION *= *"\([^"]*\)".*/\1/p' src/test_tracker.py)"
+          version="$(sed -n 's/^APP_VERSION *= *"\([^"]*\)".*/\1/p' src/app_info.py)"
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match APP_VERSION = \"$version\" in src/test_tracker.py. Update one so they match."
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match APP_VERSION = \"$version\" in src/app_info.py. Update one so they match."
             exit 1
           fi
 
       - name: Read release channel
         id: channel
         run: |
-          channel="$(sed -n 's/^APP_CHANNEL *= *"\([^"]*\)".*/\1/p' src/test_tracker.py)"
+          channel="$(sed -n 's/^APP_CHANNEL *= *"\([^"]*\)".*/\1/p' src/app_info.py)"
           echo "testing=$([ "$channel" = "testing" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       - name: Build app

@@ -16,9 +16,9 @@ cd "$(dirname "$0")/.."                 # the repo root
     --specpath build \
     src/test_tracker.py
 
-# Stamp the version from src/test_tracker.py into the app (shown in Finder → Get Info),
+# Stamp the version from src/app_info.py into the app (shown in Finder → Get Info),
 # then re-sign, since editing Info.plist invalidates the signature.
-VERSION="$(sed -n 's/^APP_VERSION *= *"\([^"]*\)".*/\1/p' src/test_tracker.py)"
+VERSION="$(sed -n 's/^APP_VERSION *= *"\([^"]*\)".*/\1/p' src/app_info.py)"
 PLIST="dist/Test Tracker.app/Contents/Info.plist"
 for key in CFBundleShortVersionString CFBundleVersion; do
     /usr/libexec/PlistBuddy -c "Set :$key $VERSION" "$PLIST" 2>/dev/null ||
