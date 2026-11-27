@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import QWidget, QToolTip, QSizePolicy
 from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal, QSize
 from PyQt5.QtGui import QPainter, QColor, QPen, QPainterPath, QFont, QFontMetrics
 
-import motion
+from ui import motion
 
 SURFACE = "#FFFFFF"
 INK, INK2, MUTED, GRID = "#1D1D1F", "#424245", "#8E8E93", "#E8E8ED"
@@ -122,7 +122,7 @@ SUBSYSTEM_KEY = "subsystem"   # admin overrides: "subsystem:ia", "workflow type:
 def register(data):
     """Learn every subsystem and category value in the sheet, so colors don't
     depend on which tab or date range is on screen."""
-    import tracker_store as store
+    from data import store
     subs, cats = [], {}
     for tab in data.get("tabs", []):
         comp = store.component_column(tab)
@@ -138,7 +138,7 @@ def register(data):
                 subs.append(v)
         # category colors: pie-style columns, plus any column a card layout draws as a
         # pie or count bars (so the admin can colour those too)
-        import layout as lay
+        from dashboard import layout as lay
         charted = set()
         try:
             for card in lay.layout_for(tab, data.get("settings"))["cards"]:
@@ -745,7 +745,7 @@ class ComponentTally(_Chart):
 def tab_colors(tab, rows=None):
     """(the row-status pseudo-column, {status value: color}) for a sheet tab —
     covers every status column, e.g. both "Coder E2E Status" and "Atlantis Status"."""
-    import tracker_store as store
+    from data import store
     col = store.derived_columns(tab).get(store.STATUS)
     if not col:
         return None, {}
@@ -804,7 +804,7 @@ def resolved_by_subsystem(entries, resolved=True):
     """A tally of the resolved (or, with resolved=False, still unresolved) failed runs,
     grouped by subsystem with their components (same look and colors as the component
     tally). Payload: (subsystem, component)."""
-    import tracker_store as store
+    from data import store
     # runs with no component recorded were likely not a specific hardware issue: left out
     done = [e for e in entries if (e[1] is not None) == resolved and e[5]]
     if not done:

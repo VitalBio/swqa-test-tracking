@@ -32,8 +32,8 @@ Rebuilt for each date range the dashboard or export shows (it takes a few ms). I
 import re, sqlite3, time
 from datetime import date
 
-import charts
-import tracker_store as store
+from dashboard import charts
+from data import store
 
 # The SQL tables keep one link per cell (the first); a cell with several links is kept
 # here too, keyed by that first link, so result tables can link each piece.
@@ -193,7 +193,7 @@ class Database:
                "created", "done", "product", "is_open", "in_qa"]
         rows = []
         for t in [t for t in tabs if store.is_bug_tab(t)]:              # 5. bugs
-            import layout as lay
+            from dashboard import layout as lay
             groups = lay.split_groups(t, {"split": "viking"}) or []
             viking = next((test for n, test in groups if n == "Viking"), lambda r: False)
             key = next((c for c in t["columns"] if any(r["links"][c["pos"]] for r in t["rows"])), t["columns"][0])
@@ -212,7 +212,7 @@ class Database:
         self._create("bugs", BUG, rows)
         self.views["bugs"] = BUG
 
-        import feature_testing                                           # 6. feature testing (JIRA)
+        from integrations import feature_testing                                           # 6. feature testing (JIRA)
         testing = self.data.get("testing") or {}
         T = ["key", "url", "effort", "part", "summary", "product", "status", "status_category", "assignee",
              "created", "updated", "sessions", "last_session", "bugs"]

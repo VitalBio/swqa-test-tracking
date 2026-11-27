@@ -37,19 +37,19 @@ from PyQt5.QtGui import (
     QTextDocument, QAbstractTextDocumentLayout, QCursor
 )
 
-import blocks
-import changelog
-import chartquery
-import charts
-import export_report
-import export_sections
-import feature_testing
-import layout
-import sqldata
-import tracker_store as store
-import motion
-import ui_theme
-import views
+from dashboard import blocks
+from integrations import changelog
+from data import chartquery
+from dashboard import charts
+from export import report as export_report
+from export import sections as export_sections
+from integrations import feature_testing
+from dashboard import layout
+from data import sqldata
+from data import store
+from ui import motion
+from ui import theme as ui_theme
+from dashboard import views
 
 APP_TITLE   = "Test Tracker"
 APP_VERSION = "2.6.1"         # bump this for each release, then push a matching tag (v2.4.0)

@@ -15,9 +15,9 @@ from datetime import date, datetime
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-import charts
-import layout as lay
-import tracker_store as store
+from dashboard import charts
+from dashboard import layout as lay
+from data import store
 
 esc = html.escape
 INK, INK2, MUTED, LINK = "#1A1A18", "#52514E", "#8A8984", "#2F5E9E"
@@ -823,7 +823,8 @@ def _ipill(text, bg, fg):
     return (f'<span style="background-color:{bg}; color:{fg}; font-size:11px">&nbsp;{esc(text)}&nbsp;</span>')
 
 def _instruments(b, tabs, ctx):
-    import changelog, feature_testing as ft
+    from integrations import changelog
+    from integrations import feature_testing as ft
     testing = (ctx.data or {}).get("testing")
     title = lay.auto_title(tabs[0], b)
     if not testing or not (testing.get("tickets") or testing.get("inst_tickets")):
@@ -929,7 +930,7 @@ def rows_of(items):
 
 def run_query(b, ctx):
     """(db, columns, rows, ms) for a query block, in this context's dates and section."""
-    import sqldata
+    from data import sqldata
     db = sqldata.for_context(ctx.data, ctx.rng, ctx.row_filter)
     cols, rows, ms = db.query(b.get("sql") or "")
     return db, cols, rows, ms
@@ -978,7 +979,7 @@ def _fmt(v):
 
 def _query_table(cols, rows, ctx, limit, sql=""):
     """HTML for a result table. "<col> link" / "<x>_link" columns become links on their column."""
-    import sqldata
+    from data import sqldata
     vis = [i for i, c in enumerate(cols) if not c.startswith("_")]
     link_cols = {i for i in vis if cols[i].endswith(" link") or cols[i].endswith("_link")}
     link_of = {}
@@ -1020,11 +1021,11 @@ def _query_table(cols, rows, ctx, limit, sql=""):
     return "".join(lines)
 
 def _friendly(col):
-    import chartquery
+    from data import chartquery
     return chartquery.friendly(col)
 
 def _sql(b, tabs, ctx):
-    import chartquery
+    from data import chartquery
     title = b.get("title") or "Query"
     try:
         db, cols, rows, _ = run_query(b, ctx)

@@ -77,7 +77,7 @@ def install(dark_mode, modules=()):
     global DARK, _TEXT, _FILL
     DARK = bool(dark_mode)
     _TEXT, _FILL = (DARK_TEXT, DARK_FILL) if DARK else (LIGHT_TEXT, LIGHT_FILL)
-    import charts
+    from dashboard import charts
     charts.set_theme(DARK)
     from PyQt5.QtWidgets import QWidget, QLabel, QTextBrowser
     set_style = QWidget.setStyleSheet
@@ -133,7 +133,7 @@ def segmented_tab_bar():
     from PyQt5.QtCore import QRectF, Qt, QVariantAnimation, QAbstractAnimation
     from PyQt5.QtGui import QColor, QPainter
     from PyQt5.QtWidgets import QTabBar
-    import motion
+    from ui import motion
 
     class SegmentedTabBar(QTabBar):
         def __init__(self):

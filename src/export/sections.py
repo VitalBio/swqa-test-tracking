@@ -17,11 +17,11 @@ import html
 from collections import Counter
 from datetime import date, timedelta
 
-import blocks
-import changelog
-import charts
-import layout as lay
-import tracker_store as store
+from dashboard import blocks
+from integrations import changelog
+from dashboard import charts
+from dashboard import layout as lay
+from data import store
 
 esc = html.escape
 INK, INK2, MUTED, LINK = "#1A1A18", "#52514E", "#8A8984", "#2F5E9E"

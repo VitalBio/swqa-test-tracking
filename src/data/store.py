@@ -302,7 +302,7 @@ def run_issue(tab, row, groups=None, as_of=None):
     (first run date, resolved date or None, root run key or None if it's its own issue).
     The issue started at the chain's first run, and is resolved only once every failed run
     in it has a Resolved date (the latest one) on or before `as_of`."""
-    import charts
+    from dashboard import charts
     groups = groups if groups is not None else issue_groups(tab)
     res, dcol = resolved_column(tab), date_column(tab)
     key = _run_key(tab, row)
@@ -371,7 +371,7 @@ def resolutions(tab, rows, rng=None):
     like an end-of-day summary: runs from the range, plus earlier failed runs that were
     still open at the end of it or got resolved during it. A run resolved after the range
     counts as not resolved yet. "Carried over" marks runs from before the range."""
-    import charts
+    from dashboard import charts
     res, dcol = resolved_column(tab), date_column(tab)
     fault, comp = fault_column(tab), component_column(tab)
     out = []
@@ -755,7 +755,7 @@ class SheetSource:
                     settings[vals[0]] = vals[1]
         testing = None
         if testing_sheet:
-            import feature_testing
+            from integrations import feature_testing
             rows = [[v.get("formattedValue", "") for v in row.get("values", [])]
                     for row in grids.get(testing_sheet["properties"]["sheetId"], [])]
             testing = feature_testing.from_rows(rows)

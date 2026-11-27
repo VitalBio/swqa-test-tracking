@@ -16,8 +16,8 @@ with the admin passcode; anyone can duplicate one into their own views.
 
 import copy, json
 
-import layout as lay
-import tracker_store as store
+from dashboard import layout as lay
+from data import store
 
 MAIN = "main"
 PREFIX = "view:"

@@ -15,12 +15,12 @@ from datetime import date, timedelta
 from PyQt5.QtCore import Qt, QRectF, QPointF
 from PyQt5.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QTextDocument
 
-import blocks
-import changelog
-import charts
-import export_sections as es
-import layout as lay
-import tracker_store as store
+from dashboard import blocks
+from integrations import changelog
+from dashboard import charts
+from export import sections as es
+from dashboard import layout as lay
+from data import store
 
 esc = html.escape
 
@@ -128,7 +128,7 @@ class Kit:
     def retheme(self, html_):
         """Dashboard HTML (drawn for the app) in this export theme: its text greys, link blue
         and the light stripe on every other table row, which showed as a white bar on dark."""
-        import ui_theme
+        from ui import theme as ui_theme
         t = self.t
         swaps = []
         originals = (("#1A1A18", "ink"), ("#52514E", "ink2"), ("#8A8984", "muted"), ("#2F5E9E", "link"))
@@ -883,7 +883,7 @@ class Painter(es.Renderer):
     # Feature Testing ─────────────────────────────────────────────────────────
 
     def b_testing(self, width):
-        import feature_testing as ft
+        from integrations import feature_testing as ft
         testing = self.data.get("testing")
         if not testing or not testing.get("tickets"):
             return None

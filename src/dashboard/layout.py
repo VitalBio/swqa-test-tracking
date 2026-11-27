@@ -21,7 +21,7 @@ what the app showed before layouts existed.
 
 import copy, json, re, uuid
 
-import tracker_store as store
+from data import store
 
 LAYOUT_PREFIX = "layout:"
 STATUS_REF, PLATFORM_REF = "@status", "@platform"

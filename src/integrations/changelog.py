@@ -63,7 +63,8 @@ def get_secret(name):
         r = subprocess.run(["security", "find-generic-password", "-s", f"{SERVICE}-{name}", "-w"],
                            capture_output=True, text=True)
         return r.stdout.strip() if r.returncode == 0 else ""
-    import tracker_store as store, os
+    import os
+    from data import store
     try:
         return json.load(open(os.path.join(store.DATA_DIR, "secrets.json"))).get(name, "")
     except (OSError, ValueError):
@@ -80,7 +81,8 @@ def set_secret(name, value):
         if r.returncode != 0:
             raise ChangeLogError(f"Couldn't save to the Keychain: {r.stderr.strip()}")
         return
-    import tracker_store as store, os
+    import os
+    from data import store
     path = os.path.join(store.DATA_DIR, "secrets.json")
     try:
         data = json.load(open(path))
@@ -106,7 +108,8 @@ def has_credentials():
 GIT_URL = f"git@github.com:{REPO}.git"
 
 def _repo_dir():
-    import os, tracker_store as store
+    import os
+    from data import store
     return os.path.join(store.DATA_DIR, "repos", REPO.split("/")[-1] + ".git")
 
 def _git(*args, cwd=None, timeout=300):

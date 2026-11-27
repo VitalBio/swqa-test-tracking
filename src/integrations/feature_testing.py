@@ -24,7 +24,7 @@ The admin's app (the one with the JIRA token) syncs this to a hidden tab of the 
 import json, re
 from datetime import datetime, timezone
 
-import changelog
+from integrations import changelog
 
 TAB = "Test Tracker Feature Testing"
 JQL_KEY = "testing_jql"

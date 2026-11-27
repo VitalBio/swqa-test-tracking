@@ -17,7 +17,7 @@ column into links.
 
 import re
 
-import sqldata
+from data import sqldata
 
 SHOW = [("pie", "Pie"), ("bars", "Bars"), ("table", "Table"), ("days", "Per day")]
 STAT_SHOW = [("stat_pct", "Percent of all"), ("stat", "Number"), ("stat_split", "Breakdown")]
@@ -71,7 +71,7 @@ def date_columns(db, spec):
         return ["first_date", "resolved_date"]
     if src == "issues":
         return ["run_date"]
-    import tracker_store as store
+    from data import store
     tab = next((t for t in db.data["tabs"] if t["title"] == src[4:]), None)
     return [c["name"].strip() for c in tab["columns"] if c["kind"] == "date"] if tab else []
 

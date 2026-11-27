@@ -28,12 +28,12 @@ from PyQt5.QtGui import (QTextDocument, QImage, QPainter, QPageSize, QPageLayout
 from PyQt5.QtPrintSupport import QPrinter
 from PyQt5.QtWidgets import QWidget
 
-import blocks
-import charts
-import export_paint
-import export_sections
-import layout as lay
-import tracker_store as store
+from dashboard import blocks
+from dashboard import charts
+from export import paint as export_paint
+from export import sections as export_sections
+from dashboard import layout as lay
+from data import store
 
 SCALE = 2                       # charts and the PNG are drawn at 2× for sharp text
 INK, INK2, MUTED, LINE = "#1A1A18", "#52514E", "#8A8984", "#E6E4E0"
@@ -622,7 +622,7 @@ def _kpis(card, tabs, ctx):
 
 
 def _summary_paint(snap, p):
-    from charts import _font
+    from dashboard.charts import _font
     W, H, X = SUM_W, SUM_H, 40
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
