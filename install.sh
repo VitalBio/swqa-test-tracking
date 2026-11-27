@@ -1,10 +1,10 @@
 #!/bin/bash
 # Installs or updates Test Tracker on this Mac. Run in Terminal:
-#   curl -fsSL https://raw.githubusercontent.com/shivthakar-vital/test-tracking/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/VitalBio/swqa-test-tracking/main/install.sh | bash
 set -euo pipefail
 
 APP="Test Tracker.app"
-URL="${TRACKER_ZIP_URL:-https://github.com/shivthakar-vital/test-tracking/releases/latest/download/Test-Tracker-mac.zip}"
+URL="${TRACKER_ZIP_URL:-https://github.com/VitalBio/swqa-test-tracking/releases/latest/download/Test-Tracker-mac.zip}"
 DEST="${TRACKER_INSTALL_DIR:-/Applications}"
 
 if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" != "1" ]; then

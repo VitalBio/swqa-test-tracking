@@ -1,5 +1,8 @@
 # What's new
 
+## 2.6.1
+- **New home on GitHub.** The app now lives at VitalBio/swqa-test-tracking: updates, release notes and the install command use the new address.
+
 ## 2.6.0
 - **Instrument status from JIRA.** Feature Testing → *JQL…* has a new *Instruments* box with its own JQL. Each `summary ~ "…"` in it is an instrument; by default CHERRY, PROTO-0028 and PROTO-0022's Support Requests in VitalOne Product. Those instruments are always listed under Instruments, with every open support request whose title names them, and are marked *Functional* when none are open. Hardware support requests logged in test sessions still show for any other instrument, as before.
 - **Instrument Status card.** On any card (including a new custom card), ✎ Edit → *▦ Add from gallery* → *Instrument Status (from JIRA)*. It shows each instrument's state, its open tickets with their status, and when it was last tested, on the dashboard and in exports.
@@ -229,4 +232,4 @@ Everything from the 1.2.x test builds, now for everyone.
 ---
 
 ## 1.1.7 and earlier
-See the [GitHub releases](https://github.com/shivthakar-vital/test-tracking/releases).
+See the [GitHub releases](https://github.com/VitalBio/swqa-test-tracking/releases).

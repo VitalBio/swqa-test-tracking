@@ -1,6 +1,6 @@
 # Test Tracker
 
-**[⬇ Install](#install)** · [Step-by-step guide](INSTALL.md) · [Latest release](https://github.com/shivthakar-vital/test-tracking/releases/latest)
+**[⬇ Install](#install)** · [Step-by-step guide](INSTALL.md) · [Latest release](https://github.com/VitalBio/swqa-test-tracking/releases/latest)
 
 A desktop dashboard for software release testing. It reads the team's test-tracking
 **Google Sheet**, shows where testing stands at a glance, and lets you update cells, which
@@ -249,7 +249,7 @@ Settings**, delete the `admin_passcode` row, and hide the tab again. The next ti
 **On any Apple Silicon Mac**, paste this into Terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shivthakar-vital/test-tracking/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/VitalBio/swqa-test-tracking/main/install.sh | bash
 ```
 
 See **[INSTALL.md](INSTALL.md)** for step-by-step instructions to share with coworkers.
@@ -280,7 +280,7 @@ newer testing *and* stable versions.
 and click **Install this version** (the app closes, installs it, and reopens). Or in Terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shivthakar-vital/test-tracking/main/install.sh | TRACKER_ZIP_URL=https://github.com/shivthakar-vital/test-tracking/releases/download/v1.1.7/Test-Tracker-mac.zip bash
+curl -fsSL https://raw.githubusercontent.com/VitalBio/swqa-test-tracking/main/install.sh | TRACKER_ZIP_URL=https://github.com/VitalBio/swqa-test-tracking/releases/download/v1.1.7/Test-Tracker-mac.zip bash
 ```
 
 **Windows:** run `build_windows.bat` on a Windows PC with Python 3. The app ends up in

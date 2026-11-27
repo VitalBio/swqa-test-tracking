@@ -15,7 +15,7 @@ Runs in GitHub Actions with GITHUB_TOKEN and GITHUB_REPOSITORY (see .github/work
 import json, os, re, subprocess, sys, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.environ.get("GITHUB_REPOSITORY", "shivthakar-vital/test-tracking")
+REPO = os.environ.get("GITHUB_REPOSITORY", "VitalBio/swqa-test-tracking")
 MARK = "## What's new"
 INSTALL = os.path.join(HERE, ".github", "release_install.md")
 

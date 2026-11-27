@@ -10,7 +10,7 @@ look for **Chip: Apple M…**.
 2. Copy this line, paste it into Terminal, and press **Return**:
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/shivthakar-vital/test-tracking/main/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/VitalBio/swqa-test-tracking/main/install.sh | bash
    ```
 
 3. When it says **✓ Installed**, Test Tracker opens automatically. You can close Terminal.
@@ -53,7 +53,7 @@ do that once: those versions can't see new updates by themselves.
 <details>
 <summary><b>Download it instead of using Terminal</b></summary>
 
-1. Go to the [latest release](https://github.com/shivthakar-vital/test-tracking/releases/latest)
+1. Go to the [latest release](https://github.com/VitalBio/swqa-test-tracking/releases/latest)
    and download **Test-Tracker-mac.zip**.
 2. Double-click the zip, then drag **Test Tracker** into your **Applications** folder.
 3. Open it. macOS warns that it *"can't be opened"* or that *Apple could not verify it*,
